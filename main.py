@@ -3,6 +3,7 @@ import smtplib
 import requests
 import json
 import qrcode
+import re  # [추가] 정규표현식 사용을 위해 추가
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -38,33 +39,18 @@ TODAY_STR = NOW.strftime("%Y-%m-%d")
 TODAY_COMPACT = NOW.strftime("%Y%m%d")
 PDF_FILENAME = os.path.join(OUTPUT_DIR, f"주요 뉴스 요약_{TODAY_COMPACT}.pdf")
 
-# [핵심] 테스트에서 검증된 'IT/보안 전문지' 위주의 도메인 리스트
 TARGET_DOMAINS = [
-    "news.naver.com",      # 네이버 뉴스
-    "boannews.com",        # 보안뉴스
-    "dailysecu.com",       # 데일리시큐
-    "etnews.com",          # 전자신문
-    "zdnet.co.kr",         # 지디넷코리아
-    "datanet.co.kr",       # 데이터넷
-    "ddaily.co.kr",        # 디지털데일리
-    "digitaltoday.co.kr",  # 디지털투데이
-    "bloter.net",          # 블로터
-    "itworld.co.kr",       # ITWorld
-    "byline.network",      # 바이라인네트워크
-    "ciokorea.com"         # CIO Korea
+    "news.naver.com", "boannews.com", "dailysecu.com", "etnews.com", "zdnet.co.kr", 
+    "datanet.co.kr", "ddaily.co.kr", "digitaltoday.co.kr", "bloter.net", 
+    "itworld.co.kr", "byline.network", "ciokorea.com"
 ]
 
 # ==========================================
-# 2. 유틸리티 함수 (영문 필터링 안전장치 유지)
+# 2. 유틸리티 함수
 # ==========================================
 def is_korean_article(url):
-    """URL에 영어 섹션(/en/, /english/)이 포함되어 있으면 False 반환"""
     url_lower = url.lower()
-    # 도메인을 좁혔지만 혹시 모를 영문 기사 유입을 방지하기 위한 2차 방어선
-    exclude_patterns = [
-        "/en/", "/english/", "/world-en/", "/sports-en/", 
-        "cnn.com", "bbc.com", "reuters.com"
-    ]
+    exclude_patterns = ["/en/", "/english/", "/world-en/", "/sports-en/", "cnn.com", "bbc.com", "reuters.com"]
     for pat in exclude_patterns:
         if pat in url_lower:
             return False
@@ -84,13 +70,9 @@ def filter_new_articles(results):
     
     for item in results:
         url = item.get('url', '')
-        
-        # 1. 영문 기사 필터링
         if not is_korean_article(url):
             english_dropped += 1
             continue
-            
-        # 2. 히스토리 중복 필터링
         if url not in history: 
             new_results.append(item)
         else:
@@ -99,37 +81,30 @@ def filter_new_articles(results):
     print(f"  └ 영문/해외 기사 제외: {english_dropped}개")
     print(f"  └ 중복(히스토리) 제외: {history_dropped}개")
     print(f"  └ 최종 검수 대상: {len(new_results)}개")
-    
     return new_results, history
 
 # ==========================================
-# 3. 뉴스 검색 (요청하신 쿼리 적용)
+# 3. 뉴스 검색
 # ==========================================
 def search_news(query):
-    # 사용자 지정 검색어
     optimized_query = "정보보호 OR 해킹 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
-    
     print("="*60)
     print(f"[단계 1] Tavily 검색 시작: '{optimized_query}'")
-    print(f"  └ 대상 도메인: {len(TARGET_DOMAINS)}개 (IT/보안 전문지)")
     
     try:
         tavily = TavilyClient(api_key=TAVILY_KEY)
-        
         response = tavily.search(
             query=optimized_query, 
-            topic="news",
+            topic="news", 
             search_depth="advanced",
             include_domains=TARGET_DOMAINS, 
-            max_results=100
+            max_results=50
         )
-        
         raw_results = response.get('results', [])
         print(f"\n[결과 1] Tavily 수집 기사: {len(raw_results)}개")
         
         final_candidates, history = filter_new_articles(raw_results)
         
-        # 히스토리 업데이트
         for item in final_candidates: 
             history.append(item['url'])
         
@@ -143,7 +118,7 @@ def search_news(query):
         return []
 
 # ==========================================
-# 4. AI 요약 (Gemini 2.5 + 변수명 수정)
+# 4. AI 요약 (디버깅 강화 및 파싱 개선)
 # ==========================================
 def summarize_news(news_list):
     if not news_list: return []
@@ -151,28 +126,25 @@ def summarize_news(news_list):
     print("\n" + "="*60)
     print(f"[단계 3] AI(Gemini 2.5)에게 {len(news_list)}건 검수 요청")
     
-    # [지정] gemini-2.5-flash 모델 URL 사용
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # [수정 완료] today_str -> TODAY_STR (전역변수)로 변경
     prompt = f"""
-    너는 깐깐한 '보안 뉴스 편집장'이야. 
-    오늘은 [ {TODAY_STR} ] 이야. 이 날짜를 기준으로 뉴스를 검수해.
+    너는 깐깐한 '보안 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
     
     [작업 지시]
-    1. 날짜 확인: 기사 내용이나 메타데이터를 보고, 오늘({TODAY_STR}) 기준으로 '2일 이내' 기사만 남겨. 
-       (작년 기사나, 1주일 넘은 기사는 과감히 삭제해.)
-    2. 주제 확인: '정보보호', '해킹', '보안' 관련 내용만 남겨. (스포츠, 단순홍보 제외)
-    3. 대상 확정: 그 중에서 보안 뉴스 편집장으로서 판단하기에 중요도가 높은 기사를 최대 10개만 선정해
-    4. 요약 작성: 핵심 내용을 한국어로 3줄 요약해.
-    5. 날짜 추출: 기사의 발행일(YYYY-MM-DD)을 찾아서 'date' 필드에 넣어줘.
+    1. 다음 뉴스 목록에서 '정보보호, 해킹, 보안, 개인정보'와 직접 관련된 기사만 남겨라.
+    2. 스포츠, 연예, 주식 시황 기사는 무조건 삭제해라.
+    3. 남은 기사는 한국어로 3줄 요약해라.
+    4. **중요:** 결과는 반드시 순수한 JSON 리스트 포맷(`[...]`)으로만 출력해라. 
+       - 마크다운 코드블록(```json)이나 다른 설명 텍스트를 절대 붙이지 마라.
+       - 만약 적합한 기사가 하나도 없다면 빈 리스트 `[]`를 반환해라.
 
     [입력 데이터]
     {json.dumps(news_list)}
     
-    [출력 포맷]
-    [ {{ "title": "기사제목", "source": "언론사", "summary": "요약", "date": "날짜", "url": "링크" }} ]
+    [출력 예시]
+    [ {{ "title": "제목", "source": "언론사", "summary": "요약", "date": "날짜", "url": "링크" }} ]
     """
     
     data = {
@@ -192,20 +164,38 @@ def summarize_news(news_list):
             res_json = response.json()
             if 'candidates' not in res_json: 
                 print("❌ AI 응답 오류 (Candidates 없음)")
-                print(response.text)
+                print(f"응답 전문: {response.text}")
                 return []
             
-            text = res_json['candidates'][0]['content']['parts'][0]['text']
+            raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
             
-            start = text.find('[')
-            end = text.rfind(']') + 1
-            if start == -1: return []
+            # [디버깅] AI가 뱉은 텍스트가 뭔지 확인 (앞부분 200자만 출력)
+            # print(f"🔍 AI Raw Response: {raw_text[:200]} ...")
             
-            result = json.loads(text[start:end])
-            print(f"\n[결과 3] AI 최종 선정: {len(result)}개")
-            for i, item in enumerate(result):
-                print(f"  {i+1}. {item.get('title')}")
-            return result
+            # 1. 마크다운 제거
+            clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+            
+            # 2. JSON 파싱 (Regex로 리스트 부분만 추출 시도)
+            # '['로 시작해서 ']'로 끝나는 구간을 찾음
+            match = re.search(r'\[.*\]', clean_text, re.DOTALL)
+            
+            if match:
+                json_str = match.group()
+                try:
+                    result = json.loads(json_str)
+                    print(f"\n[결과 3] AI 최종 선정: {len(result)}개")
+                    for i, item in enumerate(result):
+                        print(f"  {i+1}. {item.get('title')}")
+                    return result
+                except json.JSONDecodeError as je:
+                    print(f"❌ JSON 파싱 실패: {je}")
+                    print(f"❌ AI 원본 텍스트:\n{clean_text}")
+                    return []
+            else:
+                print("❌ JSON 리스트 형식을 찾을 수 없습니다.")
+                print(f"❌ AI 원본 텍스트:\n{raw_text}")
+                return []
+                
         else:
             print(f"❌ API Error: {response.status_code}")
             print(response.text)
@@ -333,15 +323,12 @@ def send_email(pdf_filename):
 # ==========================================
 if __name__ == "__main__":
     try:
-        # 1. 뉴스 검색
         news_data = search_news("") 
         
         final_data = []
         if news_data:
-            # 2. AI 필터링 및 요약
             final_data = summarize_news(news_data)
         
-        # 3. 결과 처리
         if final_data:
             create_pdf(final_data, PDF_FILENAME, is_empty=False)
             send_email(PDF_FILENAME)
