@@ -29,8 +29,8 @@ def search_news(query):
 def summarize_news(news_list):
     print("Gemini에게 요약을 요청합니다...")
     
-    # Gemini 1.5 Flash 모델 API 주소
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    # 모델 변경: gemini-1.5-flash -> gemini-pro (가장 안정적)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_KEY}"
     
     headers = {'Content-Type': 'application/json'}
     
