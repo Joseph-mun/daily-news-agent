@@ -26,6 +26,15 @@ jobs:
       run: |
         pip install -r requirements.txt
 
+# (선택 사항) 결과물 탭에 PDF 임시 업로드
+    - name: PDF 결과물 업로드
+      uses: actions/upload-artifact@v4
+      with:
+        name: Daily-Briefing-PDF
+        path: "*.pdf"
+        retention-days: 30
+
+
     - name: 에이전트 실행
       env:
         TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
