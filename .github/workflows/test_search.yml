@@ -1,7 +1,7 @@
 name: Test Search Logic (Manual)
 
 on:
-  workflow_dispatch: # 수동 실행 버튼 활성화
+  workflow_dispatch: # 수동 실행
 
 jobs:
   test-search:
@@ -18,10 +18,12 @@ jobs:
 
       - name: 라이브러리 설치
         run: |
-          pip install tavily-python
+          pip install requests tavily-python
 
-      - name: 검색 테스트 스크립트 실행
+      - name: 검색 및 요약 테스트 실행
         env:
+          # [수정] Tavily와 Gemini 키를 둘 다 환경변수로 넘겨줘야 함
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python main_test.py
