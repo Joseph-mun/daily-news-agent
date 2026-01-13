@@ -123,7 +123,7 @@ def summarize_news(news_list):
 
     print(f"Gemini에게 {len(news_list)}건 정밀 검수 및 요약 요청 중...")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
