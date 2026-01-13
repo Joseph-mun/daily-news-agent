@@ -31,7 +31,7 @@ def test_search():
         return
 
     # 검색어는 심플하게 되돌립니다. 도메인이 확실하면 영어 배제 키워드는 굳이 필요 없습니다.
-    query = "정보보호 or 해킹 or 개인정보유출 or 사이버보안 or 랜섬웨어"
+    query = "정보보호 OR 해킹 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
     
     print(f"🔎 검색어: {query}")
     print(f"🎯 대상 도메인: {len(TARGET_DOMAINS)}개 (IT/보안 전문지 중심)")
