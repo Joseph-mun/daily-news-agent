@@ -38,7 +38,7 @@ TODAY_STR = NOW.strftime("%Y-%m-%d")
 TODAY_COMPACT = NOW.strftime("%Y%m%d")
 PDF_FILENAME = os.path.join(OUTPUT_DIR, f"주요 뉴스 요약_{TODAY_COMPACT}.pdf")
 
-# [핵심 변경] 테스트에서 검증된 'IT/보안 전문지' 위주의 도메인 리스트
+# [핵심] 테스트에서 검증된 'IT/보안 전문지' 위주의 도메인 리스트
 TARGET_DOMAINS = [
     "news.naver.com",      # 네이버 뉴스
     "boannews.com",        # 보안뉴스
@@ -103,10 +103,10 @@ def filter_new_articles(results):
     return new_results, history
 
 # ==========================================
-# 3. 뉴스 검색 (테스트된 로직 적용)
+# 3. 뉴스 검색 (요청하신 쿼리 적용)
 # ==========================================
 def search_news(query):
-    # 테스트에서 성공한 검색어
+    # 사용자 지정 검색어
     optimized_query = "정보보호 OR 해킹 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
     
     print("="*60)
@@ -143,7 +143,7 @@ def search_news(query):
         return []
 
 # ==========================================
-# 4. AI 요약 (사용자 지정: Gemini 2.5)
+# 4. AI 요약 (Gemini 2.5 + 변수명 수정)
 # ==========================================
 def summarize_news(news_list):
     if not news_list: return []
@@ -155,16 +155,18 @@ def summarize_news(news_list):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # [수정 완료] today_str -> TODAY_STR (전역변수)로 변경
     prompt = f"""
     너는 깐깐한 '보안 뉴스 편집장'이야. 
-    오늘은 [ {today_str} ] 이야. 이 날짜를 기준으로 뉴스를 검수해.
+    오늘은 [ {TODAY_STR} ] 이야. 이 날짜를 기준으로 뉴스를 검수해.
     
     [작업 지시]
-    1. 날짜 확인: 기사 내용이나 메타데이터를 보고, 오늘({today_str}) 기준으로 '2일 이내' 기사만 남겨. 
+    1. 날짜 확인: 기사 내용이나 메타데이터를 보고, 오늘({TODAY_STR}) 기준으로 '2일 이내' 기사만 남겨. 
        (작년 기사나, 1주일 넘은 기사는 과감히 삭제해.)
     2. 주제 확인: '정보보호', '해킹', '보안' 관련 내용만 남겨. (스포츠, 단순홍보 제외)
-    3. 요약 작성: 핵심 내용을 한국어로 3줄 요약해.
-    4. 날짜 추출: 기사의 발행일(YYYY-MM-DD)을 찾아서 'date' 필드에 넣어줘.
+    3. 대상 확정: 그 중에서 보안 뉴스 편집장으로서 판단하기에 중요도가 높은 기사를 최대 10개만 선정해
+    4. 요약 작성: 핵심 내용을 한국어로 3줄 요약해.
+    5. 날짜 추출: 기사의 발행일(YYYY-MM-DD)을 찾아서 'date' 필드에 넣어줘.
 
     [입력 데이터]
     {json.dumps(news_list)}
