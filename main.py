@@ -58,7 +58,7 @@ def filter_new_articles(results):
 # 3. 뉴스 검색 (광범위 수집)
 # ==========================================
 def search_news(query):
-    # 스포츠/연예 등 제외어 없이 광범위하게 수집 (AI가 필터링함)
+    # Python에서는 최대한 넓게 긁어오고, 판단은 AI에게 맡김
     optimized_query = "정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안"
     
     print(f"'{optimized_query}' 검색 시작...")
@@ -90,32 +90,41 @@ def search_news(query):
         return []
 
 # ==========================================
-# 4. AI 요약 (요청하신 2.5 버전 적용)
+# 4. AI 요약 (국내 언론사 한정 필터링 추가)
 # ==========================================
 def summarize_news(news_list):
     if not news_list: return []
 
-    print(f"Gemini에게 {len(news_list)}건 요청 중...")
+    print(f"Gemini에게 {len(news_list)}건 요청 중 (국내 언론사 필터링)...")
     
-    # [사용자 요청 반영] Gemini 2.5 버전 URL 적용
+    # 모델 URL 설정 (Gemini 2.5 요청 반영)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # 프롬프트: f-string 내부의 중괄호는 {{ }}로 이스케이프 처리
+    # [핵심] 프롬프트에 '국내 언론사 한정' 지침 강력 추가
     prompt = f"""
-    너는 '보안 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
+    너는 대한민국 최고의 'IT 보안 전문 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
     
-    [지침]
-    1. 기사 목록에서 '정보보호, 해킹, 보안'과 직접 관련된 뉴스만 남겨라.
-    2. 스포츠(야구, 축구), 연예, 단순 광고성 기사는 무조건 삭제해라.
-    3. 남은 기사는 한국어 3줄 요약해라.
-    4. 결과는 오직 JSON 리스트로만 출력해라.
-    
+    제공된 뉴스 기사 목록을 엄격하게 심사하여 아래 기준에 맞는 기사만 선별해라.
+
+    [필수 필터링 기준]
+    1. **[국내 언론사 한정]**: 반드시 **'대한민국 국내 언론사'** (주요 일간지, 방송사, IT/보안 전문지 등)의 기사만 남겨라.
+       - 해외 외신(영어 등 외국어 사이트), 번역기 돌린 듯한 사이트는 무조건 삭제해라.
+       - 개인 블로그, 커뮤니티(뽐뿌, 클리앙 등), 위키 글도 삭제해라.
+    2. **[주제 적합성]**: '정보보호, 해킹, 보안, 개인정보'와 직접 관련된 뉴스만 남겨라.
+    3. **[노이즈 제거]**: 
+       - 스포츠(야구, 축구 등) 관련 기사는 '보안' 단어가 있어도 무조건 삭제.
+       - 연예인 사생활, 단순 업체 홍보/광고 보도자료는 삭제.
+
+    [요약 및 출력 지침]
+    - 살아남은 기사는 한국어로 3줄 이내 핵심 요약해라.
+    - 결과는 오직 JSON 리스트 형식으로만 출력해라.
+
     [입력 데이터]
     {json.dumps(news_list)}
     
     [출력 포맷]
-    [ {{ "title": "제목", "source": "출처", "summary": "요약", "date": "날짜", "url": "링크" }} ]
+    [ {{ "title": "기사제목", "source": "언론사명", "summary": "요약내용", "date": "날짜", "url": "링크" }} ]
     """
     
     data = {
@@ -143,7 +152,7 @@ def summarize_news(news_list):
             if start == -1: return []
             
             result = json.loads(text[start:end])
-            print(f"✅ AI 필터링 및 요약 완료: {len(result)}개 선정됨.")
+            print(f"✅ AI 필터링(국내뉴스) 완료: {len(result)}개 선정됨.")
             return result
         else:
             print(f"API Error: {response.status_code} - {response.text}")
@@ -153,14 +162,13 @@ def summarize_news(news_list):
         return []
 
 # ==========================================
-# 5. PDF 생성 (공통 함수)
+# 5. PDF 생성
 # ==========================================
 def create_pdf(articles, filename, is_empty=False):
     print(f"PDF 생성 중 ({filename})...")
     pdf = FPDF()
     pdf.add_page()
     
-    # 폰트 설정
     if os.path.exists('NanumGothic.ttf'):
         pdf.add_font('Nanum', '', 'NanumGothic.ttf', uni=True)
         pdf.set_font('Nanum', '', 10)
@@ -172,14 +180,14 @@ def create_pdf(articles, filename, is_empty=False):
     pdf.cell(0, 10, f"Daily Security Briefing ({TODAY_STR})", ln=True, align='C')
     pdf.ln(10)
 
-    # [중요] 기사가 없거나 빈 상태일 때 안내 문구 출력
+    # 기사가 없을 때 안내
     if is_empty or not articles:
         pdf.set_font_size(12)
-        pdf.multi_cell(0, 10, "No significant security news found today.\n(오늘은 AI가 선정한 주요 보안 뉴스가 없습니다.)", align='C')
+        pdf.multi_cell(0, 10, "No significant domestic security news found today.\n(오늘 AI가 선정한 국내 주요 보안 뉴스가 없습니다.)", align='C')
         pdf.output(filename)
         return
 
-    # 기사가 있을 때 루프
+    # 기사 출력
     for idx, article in enumerate(articles, 1):
         source_name = article.get('source', 'News')
         title_text = f"{idx}. {article['title']} ({source_name})"
@@ -234,9 +242,9 @@ def send_email(pdf_filename):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = ", ".join(RECIPIENTS)
-    msg['Subject'] = Header(f"[{TODAY_STR}] 주요 정보보호 뉴스 브리핑", 'utf-8')
+    msg['Subject'] = Header(f"[{TODAY_STR}] 주요 정보보호 뉴스 브리핑 (국내)", 'utf-8')
 
-    body = f"안녕하세요.\n{TODAY_STR}일자 주요 보안 뉴스 브리핑입니다.\n\n첨부된 PDF 파일을 확인해주세요."
+    body = f"안녕하세요.\n{TODAY_STR}일자 국내 주요 보안 뉴스 브리핑입니다.\n\n첨부된 PDF 파일을 확인해주세요."
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
     with open(pdf_filename, "rb") as f:
@@ -257,28 +265,23 @@ def send_email(pdf_filename):
         print(f"Email Error: {e}")
 
 # ==========================================
-# 7. 메인 실행 (Github Actions 에러 방지)
+# 7. 메인 실행
 # ==========================================
 if __name__ == "__main__":
     try:
-        # 1. 뉴스 검색
         news_data = search_news("") 
         
         final_data = []
         if news_data:
-            # 2. AI 필터링 및 요약
             final_data = summarize_news(news_data)
         
-        # 3. 결과에 따라 PDF 처리
         if final_data:
-            # 뉴스가 있을 때
             create_pdf(final_data, PDF_FILENAME, is_empty=False)
             send_email(PDF_FILENAME)
         else:
-            # 뉴스가 없거나 API 에러 등으로 0건일 때 -> 빈 PDF 생성
-            print("ℹ️ 결과 없음: '뉴스 없음' PDF를 생성합니다.")
+            print("ℹ️ 결과 없음: '뉴스 없음' PDF 생성")
             create_pdf([], PDF_FILENAME, is_empty=True)
-            # send_email(PDF_FILENAME) # 빈 메일 수신 희망 시 주석 해제
+            # send_email(PDF_FILENAME)
 
     except Exception as e:
         print(f"Critical Error: {e}")
