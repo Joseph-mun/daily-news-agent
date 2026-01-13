@@ -18,34 +18,51 @@ TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
-TO_EMAIL = os.environ.get("TO_EMAIL") or EMAIL_USER
+# 기본 수신자 (GitHub Secrets)
+MAIN_RECIPIENT = os.environ.get("TO_EMAIL") or EMAIL_USER
+
+# [요구사항 2] 추가 수신자 리스트
+# (환경변수 TO_EMAIL이 있다면 그것과 합쳐서 리스트로 관리)
+RECIPIENTS = []
+if MAIN_RECIPIENT:
+    RECIPIENTS.append(MAIN_RECIPIENT)
+
+# 추가 요청된 수신자 (중복 방지)
+ADDITIONAL_EMAIL = "joseph.moon@shinhan.com"
+if ADDITIONAL_EMAIL not in RECIPIENTS:
+    RECIPIENTS.append(ADDITIONAL_EMAIL)
 
 HISTORY_FILE = "history.json"
 
-# [요구사항 2] 국내 주요 언론사 (정보보호, IT 전문지 + 주요 통신사)
+# [요구사항 1] 요청하신 도메인 리스트 적용
 TARGET_DOMAINS = [
-    "boannews.com",     # 보안뉴스
-    "dailysecu.com",    # 데일리시큐
+    "yna.co.kr",        # 연합뉴스
     "etnews.com",       # 전자신문
     "zdnet.co.kr",      # 지디넷코리아
+    "boannews.com",     # 보안뉴스
+    "dailysecu.com",    # 데일리시큐
     "datanet.co.kr",    # 데이터넷
     "ddaily.co.kr",     # 디지털데일리
     "digitaltoday.co.kr", # 디지털투데이
-    "byline.network",   # 바이라인네트워크
+    "inews24.com",      # 아이뉴스24
+    "bloter.net",       # 블로터
     "itworld.co.kr",    # ITWorld
     "ciokorea.com",     # CIO Korea
-    "yna.co.kr",        # 연합뉴스
-    "news1.kr",         # 뉴스1
+    "hani.co.kr",       # 한겨레
+    "chosun.com",       # 조선일보
+    "donga.com",        # 동아일보
+    "joongang.co.kr",   # 중앙일보
+    "mk.co.kr",         # 매일경제
+    "hankyung.com",     # 한국경제
+    "mt.co.kr",         # 머니투데이
     "newsis.com",       # 뉴시스
-    "inews24.com"       # 아이뉴스24
+    "news1.kr"          # 뉴스1
 ]
 
-# 날짜 포맷팅 (파일명 및 메일용)
+# 날짜 포맷팅
 NOW = datetime.now()
-TODAY_STR = NOW.strftime("%Y-%m-%d")       # 2026-01-13
-TODAY_COMPACT = NOW.strftime("%Y%m%d")     # 20260113
-
-# [요구사항 4] 파일명 설정
+TODAY_STR = NOW.strftime("%Y-%m-%d")
+TODAY_COMPACT = NOW.strftime("%Y%m%d")
 PDF_FILENAME = f"주요 뉴스 요약_{TODAY_COMPACT}.pdf"
 
 # 2. 중복 기사 필터링
@@ -65,20 +82,19 @@ def filter_new_articles(results):
             new_results.append(item)
     return new_results, history
 
-# 3. 뉴스 검색 (파이썬 필터는 최소화, AI에게 위임)
+# 3. 뉴스 검색
 def search_news(query):
-    # 스포츠 등 노이즈 제거 쿼리
-    optimized_query = "정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안 -야구 -축구 -스포츠 -연예 -포토"
+    # 스포츠/연예 기사 유입 방지를 위한 강력한 필터 유지
+    optimized_query = "정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안 -야구 -축구 -스포츠 -연예 -포토 -드라마"
     
-    print(f"'{optimized_query}' 검색 중 (국내 주요 언론사)...")
+    print(f"'{optimized_query}' 검색 중...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     
-    # [요구사항 1] API 단계에서 2일로 제한
     response = tavily.search(
         query=optimized_query, 
         topic="news",
         search_depth="advanced", 
-        max_results=30, # 넉넉히 가져옴
+        max_results=40, # 도메인이 늘어났으므로 검색량 증대
         include_domains=TARGET_DOMAINS,
         days=2  
     )
@@ -86,23 +102,19 @@ def search_news(query):
     raw_results = response['results']
     print(f"1차 검색결과: {len(raw_results)}개.")
     
-    # 여기서 날짜를 너무 빡빡하게 거르면(None 등) 다 날아가므로
-    # 제목에 '야구' 등이 있는 명백한 노이즈만 1차로 거름
+    # 제목 기반 노이즈 1차 제거
     candidates = []
     for item in raw_results:
         title = item.get('title', '')
-        if any(bad in title for bad in ['야구', '축구', '경기', '스포츠', '배우', '드라마', '홈런']):
+        # 스포츠 관련 단어가 제목에 있으면 제외
+        if any(bad in title for bad in ['야구', '축구', '경기', '스포츠', '배우', '드라마', '홈런', '타자', '투수']):
             continue
         candidates.append(item)
 
-    # 중복 제거
     final_candidates, history = filter_new_articles(candidates)
-    
-    # AI에게 보낼 최대 개수 제한 (비용 및 속도 고려)
     final_selection = final_candidates[:15]
     print(f"AI에게 검수 요청할 기사: {len(final_selection)}개")
 
-    # 히스토리 임시 저장 (AI 검수 후 최종 확정된 것만 남기는 게 좋지만, 편의상 검색된 URL 저장)
     for item in final_selection:
         history.append(item['url'])
         
@@ -111,7 +123,7 @@ def search_news(query):
 
     return final_selection
 
-# 4. AI 상세 요약 및 [요구사항 5] AI 기반 날짜 검증
+# 4. AI 상세 요약 (언론사명 추출 추가)
 def summarize_news(news_list):
     if not news_list:
         return []
@@ -121,35 +133,30 @@ def summarize_news(news_list):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # 프롬프트: AI가 직접 내용을 읽고 날짜를 판단하도록 지시
     prompt = f"""
     너는 깐깐한 '보안 뉴스 편집장'이야. 
     오늘은 [ {TODAY_STR} ] 이야.
     
-    제공된 뉴스 데이터를 분석해서 다음 작업을 수행해:
+    데이터를 분석해서 다음 작업을 수행해:
     
-    1. [날짜 검증]: 기사의 내용과 메타데이터를 종합적으로 판단해. 
-       오늘({TODAY_STR})을 기준으로 '만 2일(48시간)' 이내의 최신 기사만 남겨.
-       (오래된 기사, 작년 기사, 날짜가 불명확한 기사는 과감히 삭제해.)
-       
-    2. [주제 필터링]: '정보보호', '해킹', '보안', '개인정보'와 관련된 기사만 남겨.
+    1. [날짜 검증]: 오늘({TODAY_STR}) 기준 '만 2일(48시간)' 이내 최신 기사만 남겨. (오래된 것 삭제)
+    2. [주제 필터링]: '정보보호', '해킹', '보안', '개인정보' 관련 기사만 남겨.
+    3. [언론사 추출]: 기사 내용이나 URL을 보고 언론사 이름(예: 조선일보, 보안뉴스, ZDNet)을 파악해.
+    4. [요약]: 핵심 내용을 한국어로 3줄 요약해.
     
-    3. [요약]: 남은 기사의 핵심 내용을 한국어로 3줄 요약해.
-    
-    4. [출력]: 아래 JSON 리스트 형식으로 반환해.
-    
-    [입력 데이터]
-    {json.dumps(news_list)}
-    
-    [출력 형식 예시]
+    [출력 형식 (JSON)]
     [
         {{
             "title": "기사 제목", 
+            "source": "언론사명", 
             "summary": "요약 내용", 
             "date": "YYYY-MM-DD", 
             "url": "원문링크"
         }}
     ]
+    
+    [입력 데이터]
+    {json.dumps(news_list)}
     """
     
     safety_settings = [
@@ -169,18 +176,15 @@ def summarize_news(news_list):
         if response.status_code == 200:
             res_json = response.json()
             if 'candidates' not in res_json or not res_json['candidates']:
-                print("🚨 AI 응답 없음 (필터링됨)")
                 return []
-                
+            
             text = res_json['candidates'][0]['content']['parts'][0]['text']
             start = text.find('[')
             end = text.rfind(']') + 1
-            if start == -1: 
-                print("🚨 JSON 형식 오류")
-                return []
+            if start == -1: return []
             
             result = json.loads(text[start:end])
-            print(f"✅ AI 검수 완료: {len(result)}개 (날짜 및 주제 필터링 적용됨)")
+            print(f"✅ AI 검수 완료: {len(result)}개")
             return result
         else:
             print(f"API Error: {response.text}")
@@ -189,7 +193,7 @@ def summarize_news(news_list):
         print(f"Error: {e}")
         return []
 
-# 5. PDF 생성 (파일명 변경 적용)
+# 5. PDF 생성 (제목 옆에 언론사명 추가)
 def create_pdf(articles, filename):
     if not articles:
         return
@@ -205,15 +209,17 @@ def create_pdf(articles, filename):
         pdf.set_font("Arial", size=10)
 
     pdf.set_font_size(16)
-    # PDF 내부 제목
     pdf.cell(0, 10, f"Daily Security Briefing ({TODAY_STR})", ln=True, align='C')
     pdf.ln(10)
 
     for idx, article in enumerate(articles, 1):
-        # 제목
+        # [요구사항 3] 제목 + (언론사명)
+        source_name = article.get('source', 'Unknown')
+        title_text = f"{idx}. {article['title']} ({source_name})"
+        
         pdf.set_font_size(13)
         pdf.set_text_color(0, 51, 102)
-        pdf.multi_cell(0, 8, f"{idx}. {article['title']}")
+        pdf.multi_cell(0, 8, title_text)
         
         # 날짜
         pdf.set_font_size(9)
@@ -228,7 +234,7 @@ def create_pdf(articles, filename):
         pdf.multi_cell(0, 6, article['summary'])
         pdf.ln(2)
         
-        # QR 코드
+        # QR
         qr_filename = f"qr_{idx}.png"
         qr = qrcode.make(article['url'])
         qr.save(qr_filename)
@@ -253,20 +259,24 @@ def create_pdf(articles, filename):
 
     pdf.output(filename)
 
-# 6. 이메일 발송 ([요구사항 3] 메일 제목 수정)
+# 6. 이메일 발송 (다중 수신자 처리)
 def send_email(pdf_filename):
     if not os.path.exists(pdf_filename):
         return
 
+    # 수신자가 없으면 중단
+    if not RECIPIENTS:
+        print("수신자(TO_EMAIL)가 설정되지 않았습니다.")
+        return
+
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
-    msg['To'] = TO_EMAIL
+    # 여러 수신자를 콤마로 연결해 표기
+    msg['To'] = ", ".join(RECIPIENTS)
     
-    # [요구사항 3] 메일 제목 변경
     subject_text = f"[{TODAY_STR}] 주요 정보보호 뉴스 브리핑"
     msg['Subject'] = Header(subject_text, 'utf-8')
 
-    # 본문
     body = f"""
     안녕하세요.
     {TODAY_STR}일자 주요 보안 뉴스 브리핑입니다.
@@ -276,21 +286,21 @@ def send_email(pdf_filename):
     """
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-    # 파일 첨부
     with open(pdf_filename, "rb") as f:
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(f.read())
         encoders.encode_base64(part)
-        
-        # 파일명 인코딩 처리 (한글 파일명 깨짐 방지)
         part.add_header('Content-Disposition', 'attachment', filename=Header(pdf_filename, 'utf-8').encode())
         msg.attach(part)
 
     server = smtplib.SMTP('smtp.gmail.com', 587)
     server.starttls()
     server.login(EMAIL_USER, EMAIL_PASS)
-    server.send_message(msg)
+    
+    # [중요] 실제 발송은 리스트에 있는 모든 사람에게 수행
+    server.send_message(msg) 
     server.quit()
+    print(f"메일 발송 완료: {', '.join(RECIPIENTS)}")
 
 if __name__ == "__main__":
     try:
@@ -298,12 +308,10 @@ if __name__ == "__main__":
         if news_data:
             analyzed_data = summarize_news(news_data)
             if analyzed_data:
-                # [요구사항 4] 정의된 파일명 사용
                 create_pdf(analyzed_data, PDF_FILENAME)
                 send_email(PDF_FILENAME)
-                print(f"발송 완료: {PDF_FILENAME}")
             else:
-                print("결과 없음: AI 필터링 결과 0건")
+                print("결과 없음: AI 필터링 0건")
         else:
             print("검색 결과 없음")
                 
