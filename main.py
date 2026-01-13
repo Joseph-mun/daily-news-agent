@@ -1,153 +1,265 @@
-import json
 import os
+import smtplib
 import requests
-from datetime import datetime
-from openai import OpenAI  # pip install openai
+import json
+import qrcode
+from datetime import datetime, timedelta
+from dateutil import parser
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email.header import Header
+from email import encoders
+from fpdf import FPDF
+from tavily import TavilyClient
 
-# ==========================================
-# 1. 설정값 (API 키 및 파일 경로)
-# ==========================================
-OPENAI_API_KEY = "sk-..."  # 여기에 OpenAI API 키 입력
-HISTORY_FILE = "news_history.json"
-SEARCH_QUERY = '정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안 -야구 -축구 -스포츠 -연예 -포토'
+# 1. 환경변수
+TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+EMAIL_USER = os.environ.get("EMAIL_USER")
+EMAIL_PASS = os.environ.get("EMAIL_PASS")
+MAIN_RECIPIENT = os.environ.get("TO_EMAIL") or EMAIL_USER
 
-# AI 클라이언트 초기화
-client = OpenAI(api_key=OPENAI_API_KEY)
+# 수신자 리스트
+RECIPIENTS = []
+if MAIN_RECIPIENT: RECIPIENTS.append(MAIN_RECIPIENT)
 
-# ==========================================
-# 2. 히스토리(중복 방지) 관리 함수
-# ==========================================
-def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return []
-    with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-        try:
-            return json.load(f)
-        except:
-            return []
+ADDITIONAL_EMAIL = "joseph.moon@shinhan.com"
+if ADDITIONAL_EMAIL not in RECIPIENTS: RECIPIENTS.append(ADDITIONAL_EMAIL)
 
-def save_history(new_links, existing_history):
-    # 기존 히스토리에 새 링크 추가 (최신 1000개만 유지 등 관리 가능)
-    updated_history = list(set(existing_history + new_links))
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(updated_history, f, ensure_ascii=False, indent=4)
+HISTORY_FILE = "history.json"
 
-# ==========================================
-# 3. 검색 API (기존 코드 이식 필요)
-# ==========================================
-def fetch_search_results(query):
-    print(f"[{query}] 검색 시작...")
+NOW = datetime.now()
+TODAY_STR = NOW.strftime("%Y-%m-%d")
+TODAY_COMPACT = NOW.strftime("%Y%m%d")
+PDF_FILENAME = f"주요 뉴스 요약_{TODAY_COMPACT}.pdf"
+
+# 2. 중복 필터링 (히스토리 관리)
+def filter_new_articles(results):
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            try: history = json.load(f)
+            except: history = []
+    else: history = []
+
+    new_results = []
+    for item in results:
+        # URL이 히스토리에 없으면 추가
+        if item['url'] not in history: 
+            new_results.append(item)
+    return new_results, history
+
+# 3. 뉴스 검색 (Python 필터링 제거 -> 수집 역할에 집중)
+def search_news(query):
+    # 검색어: 제외어 없이 광범위하게 검색
+    optimized_query = "정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안"
     
-    # ---------------------------------------------------------
-    # [중요] 기존에 사용하시던 네이버/구글 검색 API 코드를 여기에 넣으세요.
-    # 아래는 테스트를 위한 가짜 데이터(Dummy Data) 예시입니다.
-    # 실제로는 api_response를 받아 리스트 형태로 반환해야 합니다.
-    # ---------------------------------------------------------
+    print(f"'{optimized_query}' 광범위 검색 중...")
+    tavily = TavilyClient(api_key=TAVILY_KEY)
     
-    # 예시 데이터 구조
-    results = [
-        {"title": "OOO 해킹 사고 발생, 개인정보 유출 우려", "link": "https://news.com/1", "desc": "보안 업체 분석 결과..."},
-        {"title": "프로야구 개막, 보안 요원 배치", "link": "https://sports.com/2", "desc": "야구장 안전을 위해..."}, # AI가 걸러내야 함
-        {"title": "연예인 A씨 사생활 유출 논란", "link": "https://enter.com/3", "desc": "사진 유출로 곤욕..."}, # 애매하지만 보안 뉴스 아님
-        {"title": "정부, 사이버 보안 강화 대책 발표", "link": "https://gov.com/4", "desc": "제로트러스트 도입..."},
-    ]
-    # 실제 코드에서는: return api_result_list
-    return results
+    response = tavily.search(
+        query=optimized_query, 
+        topic="news",
+        search_depth="advanced", 
+        max_results=50, # AI가 처리할 수 있을 만큼 넉넉히
+        days=3 
+    )
+    
+    raw_results = response['results']
+    print(f"1차 API 검색결과: {len(raw_results)}개 확보.")
+    
+    # [수정됨] 도메인/키워드 필터링 로직 제거함 (AI에게 전임)
+    # 중복(히스토리) 체크만 수행
+    final_candidates, history = filter_new_articles(raw_results)
+    
+    print(f"중복 제거 후 AI 검수 요청 대상: {len(final_candidates)}개")
 
-# ==========================================
-# 4. AI에게 판단 및 요약 요청 (핵심 로직)
-# ==========================================
-def ai_judge_and_summarize(articles):
-    print("AI에게 기사 선별 및 요약 요청 중...")
+    # 히스토리 업데이트 (이번에 검색된 건은 일단 다 본 것으로 처리)
+    for item in final_candidates: history.append(item['url'])
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f: json.dump(history, f)
 
-    # AI에게 보낼 프롬프트 구성
-    # JSON 형식으로 강제하여 파이썬이 다시 읽을 수 있게 함
+    return final_candidates
+
+# 4. AI 요약 및 필터링 (핵심 로직)
+def summarize_news(news_list):
+    if not news_list: return []
+
+    print(f"Gemini에게 {len(news_list)}건에 대한 '필터링 및 요약' 요청 중...")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    
+    # 프롬프트: AI에게 편집장 역할을 부여하고 엄격한 필터링 요구
     prompt = f"""
-    너는 베테랑 '정보보호 전문 기자'이자 '편집장'이다.
-    아래 제공된 뉴스 기사 리스트(JSON)를 보고 다음 작업을 수행해라.
+    너는 까다로운 'IT 보안 전문 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
+    
+    아래 제공된 뉴스 기사 목록(JSON)을 보고 다음 단계를 수행해라.
 
-    [작업 지시]
-    1. **필터링(Filtering):** '정보보호, 해킹, 보안, 개인정보'와 직접 관련이 없는 기사는 과감히 삭제해라.
-       - 제외 대상: 스포츠(야구, 축구 등), 단순 연예 가십, 포토 뉴스, 광고성 보도자료, 주식 단순 시황.
-       - 야구장에서의 '보안(Security)'요원 배치 같은 동음이의어도 문맥을 보고 제외해라.
-    2. **요약(Summarizing):** 살아남은 보안 관련 기사는 내용을 3줄 이내로 핵심만 요약해라.
-    3. **출력(Output):** 결과는 반드시 오직 **JSON 포맷의 리스트**로만 출력해라. 다른 말은 하지 마라.
+    [1단계: 엄격한 필터링]
+    - 제목과 내용을 분석하여 **'정보보호, 해킹, 보안, 개인정보 유출'**과 직접 관련된 기술/사회 뉴스만 남겨라.
+    - **제외 대상(삭제):** 1. 스포츠 뉴스 (예: 야구장 '보안' 요원, 축구 경기 안전) -> 무조건 삭제.
+      2. 연예/가십 (예: 배우 사생활 사진 유출) -> 보안 기술 이슈가 아니면 삭제.
+      3. 단순 주식 시황, 홍보성 보도자료.
+    
+    [2단계: 요약 및 정제]
+    - 살아남은 기사에 대해:
+      1. 'source': 언론사명 추출.
+      2. 'date': 발행일 추출.
+      3. 'summary': 내용을 한국어로 3줄 이내 핵심 요약.
 
+    [3단계: 출력 형식]
+    - 오직 **JSON 리스트** 형식으로만 출력해라. (마크다운 코드블록 없이)
+    
     [입력 데이터]
-    {json.dumps(articles, ensure_ascii=False)}
-
-    [출력 예시 포맷]
-    [
-        {{"title": "기사제목", "link": "기사링크", "summary": "AI가 요약한 내용", "reason": "선정 이유(간략히)"}}
-    ]
+    {json.dumps(news_list)}
+    
+    [출력 예시]
+    [ {{ "title": "...", "source": "...", "summary": "...", "date": "...", "url": "..." }} ]
     """
-
+    
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
+    
+    data = {"contents": [{"parts": [{"text": prompt}]}], "safetySettings": safety_settings}
+    
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini", # 가성비 좋은 모델 추천 (또는 gpt-4o)
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that outputs strictly in JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"} # JSON 모드 활성화
-        )
-        
-        content = response.choices[0].message.content
-        # 가끔 JSON 리스트가 key 밑에 들어가는 경우가 있어 파싱 처리
-        parsed_data = json.loads(content)
-        
-        # GPT가 {"articles": [...]} 형태로 줄 수도 있고 그냥 [...]로 줄 수도 있음 대응
-        if isinstance(parsed_data, dict):
-            return list(parsed_data.values())[0]
-        return parsed_data
-
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            res_json = response.json()
+            if 'candidates' not in res_json: return []
+            
+            text = res_json['candidates'][0]['content']['parts'][0]['text']
+            
+            # JSON 파싱 (앞뒤 잡다한 텍스트 제거)
+            start = text.find('[')
+            end = text.rfind(']') + 1
+            if start == -1: return []
+            
+            result = json.loads(text[start:end])
+            print(f"✅ AI 필터링 및 요약 완료: {len(news_list)}개 -> {len(result)}개 선정됨.")
+            return result
+        else:
+            print(f"API Error: {response.status_code} - {response.text}")
+            return []
     except Exception as e:
-        print(f"AI 처리 중 오류 발생: {e}")
+        print(f"Summarize Error: {e}")
         return []
 
-# ==========================================
-# 5. 메인 실행부
-# ==========================================
-def main():
-    # 1. 히스토리 로드
-    history_links = load_history()
-    print(f"기존 히스토리: {len(history_links)}개 기사 저장됨.")
+# 5. PDF 생성 (기존 유지)
+def create_pdf(articles, filename):
+    if not articles: return
 
-    # 2. 기사 수집 (Python)
-    raw_articles = fetch_search_results(SEARCH_QUERY)
-    print(f"1차 수집된 기사: {len(raw_articles)}개")
-
-    # 3. 중복 제거 (이미 처리한 링크는 AI에게 보내지 않음 -> 비용 절약)
-    new_articles = [art for art in raw_articles if art['link'] not in history_links]
-    print(f"중복 제외 후 AI 검수 대상: {len(new_articles)}개")
-
-    if not new_articles:
-        print("새로운 기사가 없습니다. 종료합니다.")
-        return
-
-    # 4. AI에게 판단 맡기기 (Python은 배달만 함)
-    # 한 번에 너무 많이 보내면 토큰 제한 걸릴 수 있으니 20~30개씩 끊어 보내는 로직 추가 가능
-    # 여기서는 예시로 통째로 보냄
-    final_news = ai_judge_and_summarize(new_articles)
-
-    # 5. 결과 출력 및 히스토리 업데이트
-    print(f"\n=== AI 최종 선정 뉴스 ({len(final_news)}개) ===")
-    processed_links = []
+    print(f"PDF 생성 중 ({filename})...")
+    pdf = FPDF()
+    pdf.add_page()
     
-    for news in final_news:
-        print(f"[{news.get('title')}]")
-        print(f" - 요약: {news.get('summary')}")
-        print(f" - 링크: {news.get('link')}")
-        print("-" * 30)
+    # 폰트 설정 (시스템에 폰트가 없으면 기본 Arial 사용)
+    if os.path.exists('NanumGothic.ttf'):
+        pdf.add_font('Nanum', '', 'NanumGothic.ttf', uni=True)
+        pdf.set_font('Nanum', '', 10)
+    else:
+        pdf.set_font("Arial", size=10)
+
+    pdf.set_font_size(16)
+    pdf.cell(0, 10, f"Daily Security Briefing ({TODAY_STR})", ln=True, align='C')
+    pdf.ln(10)
+
+    for idx, article in enumerate(articles, 1):
+        source_name = article.get('source', 'News')
+        title_text = f"{idx}. {article['title']} ({source_name})"
         
-        # 결과에 포함된 링크 수집 (유효한 기사)
-        processed_links.append(news.get('link'))
-    
-    # AI가 '버린' 기사들도 다시 검토하지 않도록 히스토리에 넣을지 결정해야 함.
-    # 보통은 '검토했던 모든 링크'를 히스토리에 넣습니다. (다시 봐도 쓰레기일 확률이 높으므로)
-    all_checked_links = [art['link'] for art in new_articles]
-    save_history(all_checked_links, history_links)
-    print("히스토리 업데이트 완료.")
+        # 제목
+        pdf.set_font_size(13)
+        pdf.set_text_color(0, 51, 102) # 남색
+        pdf.multi_cell(0, 8, title_text)
+        
+        # 날짜
+        pdf.set_font_size(9)
+        pdf.set_text_color(100, 100, 100)
+        date_str = article.get('date', '')
+        pdf.cell(0, 5, f"Date: {date_str}", ln=True)
+        
+        # 요약문
+        pdf.set_font_size(10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(1)
+        pdf.multi_cell(0, 6, article['summary'])
+        pdf.ln(2)
+        
+        # QR 코드 생성
+        qr_filename = f"qr_{idx}.png"
+        qr = qrcode.make(article['url'])
+        qr.save(qr_filename)
+        
+        # QR 코드 위치 계산 및 삽입
+        y_pos = pdf.get_y()
+        # 페이지 넘어감 방지 로직
+        if y_pos > 240: 
+            pdf.add_page()
+            y_pos = pdf.get_y()
+
+        pdf.image(qr_filename, x=170, y=y_pos, w=20)
+        
+        # 링크 텍스트
+        pdf.set_text_color(0, 102, 204)
+        pdf.cell(0, 5, "[Link]", ln=True, link=article['url'])
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.ln(15)
+        os.remove(qr_filename)
+        
+        # 구분선
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(5)
+
+    pdf.output(filename)
+
+# 6. 이메일 발송 (기존 유지)
+def send_email(pdf_filename):
+    if not os.path.exists(pdf_filename): return
+    if not RECIPIENTS: return
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_USER
+    msg['To'] = ", ".join(RECIPIENTS)
+    msg['Subject'] = Header(f"[{TODAY_STR}] 주요 정보보호 뉴스 브리핑", 'utf-8')
+
+    body = f"안녕하세요.\n{TODAY_STR}일자 주요 보안 뉴스 브리핑입니다.\n\nAI가 선별한 주요 기사가 첨부파일(PDF)에 담겨있습니다.\n확인 부탁드립니다."
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    with open(pdf_filename, "rb") as f:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', 'attachment', filename=Header(pdf_filename, 'utf-8').encode())
+        msg.attach(part)
+
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.starttls()
+    server.login(EMAIL_USER, EMAIL_PASS)
+    server.send_message(msg)
+    server.quit()
+    print(f"메일 발송 완료: {len(RECIPIENTS)}명")
 
 if __name__ == "__main__":
-    main()
+    try:
+        # 1. 검색 (Python 필터링 없이 수집)
+        news_data = search_news("") 
+        
+        if news_data:
+            # 2. AI에게 필터링과 요약을 동시에 요청
+            analyzed_data = summarize_news(news_data)
+            
+            if analyzed_data:
+                # 3. 결과가 있을 때만 PDF 및 메일 발송
+                create_pdf(analyzed_data, PDF_FILENAME)
+                send_email(PDF_FILENAME)
+            else:
+                print("결과 없음: AI가 모든 기사를 필터링(제외)했습니다.")
+        else:
+            print("
