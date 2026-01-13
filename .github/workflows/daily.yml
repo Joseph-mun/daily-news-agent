@@ -1,0 +1,32 @@
+name: Daily Security Briefing
+
+on:
+  schedule:
+    # 한국 시간 아침 8시 = UTC 23시 (전날)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 수동 실행 버튼 추가
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 저장소 코드 가져오기
+      uses: actions/checkout@v3
+
+    - name: 파이썬 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: 라이브러리 설치
+      run: |
+        pip install -r requirements.txt
+
+    - name: 에이전트 실행
+      env:
+        TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      run: python main.py
