@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import re
 from datetime import datetime
 from tavily import TavilyClient
 
@@ -25,7 +26,6 @@ TARGET_DOMAINS = [
 # 2. 유틸리티 함수
 # ==========================================
 def is_valid_domain(url):
-    """지정된 도메인인지 확인"""
     if not url: return False
     for domain in TARGET_DOMAINS:
         if domain in url.lower():
@@ -33,7 +33,6 @@ def is_valid_domain(url):
     return False
 
 def call_ai_summarize(news_list):
-    """Gemini에게 뉴스 선별 및 요약 요청"""
     print("\n" + "="*60)
     print(f"🤖 [TEST] AI(Gemini 2.5)에게 {len(news_list)}건 분석 요청 중...")
     
@@ -44,13 +43,10 @@ def call_ai_summarize(news_list):
     너는 깐깐한 '보안 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
     
     [작업 지시]
-    1. 다음 뉴스 목록에서 '정보보호, 해킹, 보안, 개인정보'와 관련성이 높은 기사를 선정해라.
-    2. 해당 기사 텍스트나 메타데이터의 날짜를 확인하여, 오늘({TODAY_STR}) 기준으로 '2일 이내'의 기사인 경우에만 남겨라.
+    1. 뉴스 목록에서 '정보보호, 해킹, 보안, 개인정보' 관련 핵심 기사를 선정해라.
+    2. 오늘({TODAY_STR}) 기준으로 '2일 이내'의 기사만 남겨라.
     3. 남은 기사는 한국어로 3줄 요약해라.
-    
-    [출력 포맷]
-    반드시 아래와 같은 JSON 리스트 형식으로만 출력해라 (코드블록 없이):
-    [ {{ "title": "제목", "source": "언론사", "summary": "요약내용", "date": "발행일", "url": "링크" }} ]
+    4. **중요:** 결과는 반드시 순수 JSON 리스트 포맷(`[...]`)으로만 출력해라.
 
     [입력 데이터]
     {json.dumps(news_list)}
@@ -72,13 +68,18 @@ def call_ai_summarize(news_list):
             res_json = response.json()
             if 'candidates' not in res_json: return []
             text = res_json['candidates'][0]['content']['parts'][0]['text']
+            
+            # 마크다운 제거
             clean_text = text.replace("```json", "").replace("```", "").strip()
-            try:
-                return json.loads(clean_text)
-            except:
-                return []
+            
+            # JSON 파싱 (Regex 활용)
+            match = re.search(r'\[.*\]', clean_text, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            return []
         return []
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return []
 
 # ==========================================
@@ -86,15 +87,15 @@ def call_ai_summarize(news_list):
 # ==========================================
 def test_full_process():
     print("="*60)
-    print(f"🚀 [TEST] OR 검색 로직 테스트")
+    print(f"🚀 [TEST] 검색어 롤백 (공백 구분)")
     print(f"📅 기준 날짜: {TODAY_STR}")
     
     if not TAVILY_KEY or not GEMINI_KEY:
         print("❌ 오류: API KEY가 없습니다.")
         return
 
-    # [수정됨] OR를 사용하여 검색 범위 확장
-    query = "정보보호 OR 해킹 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
+    # [수정됨] OR 제거하고 공백으로 복귀 (관련성 중심 검색)
+    query = "정보보호 해킹 개인정보유출 사이버보안 랜섬웨어"
     print(f"\n🔍 [1단계] 검색어: {query}")
     
     try:
@@ -104,12 +105,11 @@ def test_full_process():
             topic="news",
             search_depth="advanced",
             include_domains=TARGET_DOMAINS,
-            max_results=30 
+            max_results=40 
         )
         raw_results = response.get('results', [])
         print(f"   👉 Tavily 수집 개수: {len(raw_results)}개")
 
-        # 도메인 필터링
         filtered_results = []
         for item in raw_results:
             if is_valid_domain(item.get('url')):
@@ -121,7 +121,6 @@ def test_full_process():
             print("⚠️ 기사가 없습니다.")
             return
 
-        # AI 요약
         final_articles = call_ai_summarize(filtered_results)
         
         print("\n" + "="*60)
