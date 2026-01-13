@@ -5,29 +5,36 @@ from tavily import TavilyClient
 # 1. 환경변수 확인
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 
-# 2. 검색 대상 도메인
+# [핵심 수정] 영문판 이슈가 있는 종합 일간지를 제거하고, 
+# 'IT/보안 전문지' 위주로 리스트를 압축했습니다.
 TARGET_DOMAINS = [
-    "news.naver.com", "boannews.com", "dailysecu.com", "etnews.com", "zdnet.co.kr", 
-    "datanet.co.kr", "ddaily.co.kr", "digitaltoday.co.kr", "bloter.net", 
-    "itworld.co.kr", "ciokorea.com", "byline.network",
-    "yna.co.kr", "news1.kr", "newsis.com",
-    "mk.co.kr", "hankyung.com", "mt.co.kr", "fnnews.com", "sedaily.com",
-    "chosun.com", "joongang.co.kr", "donga.com", "hani.co.kr", "khan.co.kr"
+    "news.naver.com",      # 네이버 뉴스 (가장 강력)
+    "boannews.com",        # 보안뉴스 (영문판 없음/적음)
+    "dailysecu.com",       # 데일리시큐
+    "etnews.com",          # 전자신문
+    "zdnet.co.kr",         # 지디넷코리아
+    "datanet.co.kr",       # 데이터넷
+    "ddaily.co.kr",        # 디지털데일리
+    "digitaltoday.co.kr",  # 디지털투데이
+    "bloter.net",          # 블로터
+    "itworld.co.kr",       # ITWorld
+    "byline.network",      # 바이라인네트워크
+    "ciokorea.com"         # CIO Korea
 ]
 
 def test_search():
     print("="*60)
-    print("🚀 [TEST] Tavily 검색 테스트 (검색어 강화 버전)")
+    print("🚀 [TEST] Tavily 검색 테스트 (도메인 최적화 버전)")
     
     if not TAVILY_KEY:
         print("❌ 오류: TAVILY_API_KEY 환경변수가 설정되지 않았습니다.")
         return
 
-    # [수정된 부분] 검색어에 '한국어', 제외 키워드(-english) 등을 명시
-    query = "정보보호 해킹 개인정보유출 사이버보안 랜섬웨어 관련 최신 한국어 뉴스 기사 -english -sports -baseball -soccer"
+    # 검색어는 심플하게 되돌립니다. 도메인이 확실하면 영어 배제 키워드는 굳이 필요 없습니다.
+    query = "정보보호 해킹 개인정보유출 사이버보안 랜섬웨어"
     
     print(f"🔎 검색어: {query}")
-    print(f"🎯 대상 도메인: {len(TARGET_DOMAINS)}개 언론사")
+    print(f"🎯 대상 도메인: {len(TARGET_DOMAINS)}개 (IT/보안 전문지 중심)")
     print("="*60)
 
     try:
