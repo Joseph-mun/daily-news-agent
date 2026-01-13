@@ -33,3 +33,11 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: python main.py
+
+- name: 히스토리 저장 (Commit & Push)
+      run: |
+        git config --global user.name "NewsBot"
+        git config --global user.email "bot@noreply.github.com"
+        git add history.json
+        git commit -m "Update sent news history" || echo "No changes to commit"
+        git push
