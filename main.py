@@ -62,23 +62,31 @@ def filter_new_articles(results):
         
     return new_results
 
-# 3. 뉴스 검색 (도메인 제한 적용)
+# 3. 뉴스 검색 (설정 강화: 최근 2일 & 검색량 증대)
 def search_news(query):
-    print(f"'{query}' 검색 중 (신뢰할 수 있는 언론사 기준)...")
+    # days=2로 설정 (오늘 ~ 어제 기사까지)
+    # max_results=15 (필터링 될 것을 고려해 넉넉하게 요청)
+    print(f"'{query}' 검색 중 (최근 48시간 & 주요 언론사)...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     
-    # include_domains 옵션으로 지정된 언론사에서만 검색
     response = tavily.search(
         query=query, 
         search_depth="basic", 
-        max_results=10,
+        max_results=15,                 # 요청 개수를 늘림
         include_domains=TARGET_DOMAINS,
-        days=1
+        days=2                          # 1은 너무 적을 수 있어서 2(오늘+어제) 추천
     )
     
+    # 전체 검색 결과와 신규 기사 개수를 비교해서 로그로 출력
+    total_found = len(response['results'])
     filtered = filter_new_articles(response['results'])
-    print(f"검색된 {len(response['results'])}개 중 신규 기사 {len(filtered)}개를 찾았습니다.")
-    return filtered
+    new_found = len(filtered)
+    
+    print(f"Tavily 검색 결과: {total_found}개")
+    print(f"중복 제거 후 남은 기사: {new_found}개")
+    
+    # 만약 남은 게 너무 많으면 10개로 자름
+    return filtered[:10]
 
 # 4. AI 상세 요약 (제목 원문 유지)
 def summarize_news(news_list):
