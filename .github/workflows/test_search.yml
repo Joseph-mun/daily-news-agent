@@ -1,0 +1,27 @@
+name: Test Search Logic (Manual)
+
+on:
+  workflow_dispatch: # 수동 실행 버튼 활성화
+
+jobs:
+  test-search:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v3
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 라이브러리 설치
+        run: |
+          pip install tavily-python
+
+      - name: 검색 테스트 스크립트 실행
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: |
+          python main_test.py
