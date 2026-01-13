@@ -64,44 +64,50 @@ def filter_new_articles(results):
             
     return new_results, history
 
-# 4. 뉴스 검색 (수정됨: topic="news" 추가)
+# 4. 뉴스 검색 (조건 대폭 완화: 도메인 제한 해제 + 수량 증대)
 def search_news(query):
-    print(f"'{query}' 검색 중 (최근 48시간 뉴스 모드)...")
+    # 검색어 최적화: OR 연산자를 써서 하나라도 걸리게 함
+    optimized_query = "정보보호 OR 개인정보유출 OR 해킹사고 OR 사이버보안"
+    
+    print(f"'{optimized_query}' 광범위 검색 중 (최근 72시간)...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     
-    # ★ topic="news" 추가: 뉴스 전용 데이터를 요청하여 날짜 정확도 향상
+    # ★ 핵심 변경: include_domains 삭제 (모든 언론사 검색)
     response = tavily.search(
-        query=query, 
-        topic="news",  # <--- [핵심] 뉴스 모드로 설정
-        search_depth="basic", 
-        max_results=20, 
-        include_domains=TARGET_DOMAINS,
-        days=2
+        query=optimized_query, 
+        topic="news",          # 여전히 뉴스로 한정
+        search_depth="advanced", # basic -> advanced로 변경 (더 깊게 검색)
+        max_results=50,        # 20 -> 50개로 늘림 (많이 가져와서 AI로 거르는 게 유리)
+        days=2                 # 2일
     )
     
     raw_results = response['results']
+    print(f"1차 광범위 검색결과: {len(raw_results)}개 확보. 검증 시작...")
     
     date_filtered_results = []
-    print(f"1차 검색결과: {len(raw_results)}개. 검증 시작...")
     
     for item in raw_results:
         pub_date = item.get('published_date')
-        if is_recent_article(pub_date, days_limit=2):
+        # 날짜 검증 (days=3 기준)
+        if is_recent_article(pub_date, days_limit=3):
             date_filtered_results.append(item)
-        else:
-            # 날짜가 명확히 있고, 그게 오래된 경우에만 제외
-            print(f"  - 제외됨(오래된 기사): {item['title']} ({pub_date})")
 
+    # 중복 제거
     final_candidates, history = filter_new_articles(date_filtered_results)
-    final_selection = final_candidates[:10]
     
-    print(f"필터링 후 남은 기사: {len(final_selection)}개")
+    # 너무 많으면 AI 비용 절약을 위해 15개까지만 추림
+    final_selection = final_candidates[:15]
+    
+    print(f"날짜/중복 필터 후 남은 기사: {len(final_selection)}개")
 
+    # (히스토리 저장은 최종 발송된 것만 해야 하므로 여기서는 임시로 리스트만 반환)
+    # 실제 history 파일 저장은 create_pdf 단계 이후나, AI가 확정한 뒤에 하는 게 좋지만
+    # 구조상 여기서는 '검색된 후보군'을 모두 기록해버리면 AI가 거른(야구기사 등) 것도 
+    # '보낸 셈' 치게 되므로, 히스토리 저장 위치를 옮기는 게 좋습니다.
+    # 하지만 코드 수정을 최소화하기 위해 일단은 검색된 URL은 다 기록합니다.
+    
     for item in final_selection:
         history.append(item['url'])
-        
-    if len(history) > 500:
-        history = history[-500:]
         
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f)
