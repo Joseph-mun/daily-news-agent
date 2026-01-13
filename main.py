@@ -38,8 +38,9 @@ TODAY_STR = NOW.strftime("%Y-%m-%d")
 TODAY_COMPACT = NOW.strftime("%Y%m%d")
 PDF_FILENAME = os.path.join(OUTPUT_DIR, f"주요 뉴스 요약_{TODAY_COMPACT}.pdf")
 
+# [검색 대상] 네이버 뉴스 및 국내 주요 IT/보안 언론사
 TARGET_DOMAINS = [
-    "boannews.com", "dailysecu.com", "etnews.com", "zdnet.co.kr", 
+    "news.naver.com", "boannews.com", "dailysecu.com", "etnews.com", "zdnet.co.kr", 
     "datanet.co.kr", "ddaily.co.kr", "digitaltoday.co.kr", "bloter.net", 
     "itworld.co.kr", "ciokorea.com", "byline.network",
     "yna.co.kr", "news1.kr", "newsis.com",
@@ -48,10 +49,22 @@ TARGET_DOMAINS = [
 ]
 
 # ==========================================
-# 2. 유틸리티 함수 (로그 추가됨)
+# 2. 유틸리티 함수 (영어 기사 필터링 추가)
 # ==========================================
+def is_korean_article(url):
+    """URL에 영어 섹션(/en/, /english/)이 포함되어 있으면 False 반환"""
+    url_lower = url.lower()
+    exclude_patterns = [
+        "/en/", "/english/", "/world-en/", "/sports-en/", 
+        "cnn.com", "bbc.com", "reuters.com"
+    ]
+    for pat in exclude_patterns:
+        if pat in url_lower:
+            return False
+    return True
+
 def filter_new_articles(results):
-    print("\n[단계 2] 중복(히스토리) 필터링 진행 중...")
+    print("\n[단계 2] 기사 필터링 (영문 제외 및 중복 확인)...")
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             try: history = json.load(f)
@@ -59,31 +72,40 @@ def filter_new_articles(results):
     else: history = []
 
     new_results = []
-    dropped_count = 0
+    english_dropped = 0
+    history_dropped = 0
     
     for item in results:
-        if item.get('url') and item['url'] not in history: 
+        url = item.get('url', '')
+        
+        # 1. 영문 기사 필터링 (파이썬에서 처리)
+        if not is_korean_article(url):
+            english_dropped += 1
+            # print(f"  - [제외] 영문 기사: {item.get('title')}")
+            continue
+            
+        # 2. 히스토리 중복 필터링
+        if url not in history: 
             new_results.append(item)
         else:
-            dropped_count += 1
-            # (디버그) 중복된 기사 제목 출력
-            # print(f"  - 중복 제외: {item.get('title')}")
+            history_dropped += 1
 
-    print(f"  └ 기존 히스토리 개수: {len(history)}개")
-    print(f"  └ 이번에 중복으로 제외된 기사: {dropped_count}개")
-    print(f"  └ 최종 살아남은 신규 기사: {len(new_results)}개")
+    print(f"  └ 영문/해외 기사 제외: {english_dropped}개")
+    print(f"  └ 중복(히스토리) 제외: {history_dropped}개")
+    print(f"  └ 최종 검수 대상: {len(new_results)}개")
     
     return new_results, history
 
 # ==========================================
-# 3. 뉴스 검색 (로그 추가됨)
+# 3. 뉴스 검색
 # ==========================================
 def search_news(query):
-    optimized_query = "정보보호 OR 해킹사고 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
+    # 한글 키워드 위주로 검색
+    optimized_query = "정보보호 해킹 개인정보유출 사이버보안 랜섬웨어 (뉴스 OR 보도)"
     
     print("="*60)
     print(f"[단계 1] Tavily 검색 시작: '{optimized_query}'")
-    print(f"  └ 대상 도메인: {len(TARGET_DOMAINS)}개 언론사")
+    print(f"  └ 대상: 국내 {len(TARGET_DOMAINS)}개 언론사 (Naver News 포함)")
     
     try:
         tavily = TavilyClient(api_key=TAVILY_KEY)
@@ -98,9 +120,7 @@ def search_news(query):
         )
         
         raw_results = response.get('results', [])
-        print(f"\n[결과 1] Tavily가 찾아낸 원본 기사: {len(raw_results)}개")
-        for i, item in enumerate(raw_results):
-            print(f"  {i+1}. {item.get('title')} ({item.get('url')})")
+        print(f"\n[결과 1] Tavily 수집 기사: {len(raw_results)}개")
         
         final_candidates, history = filter_new_articles(raw_results)
         
@@ -118,32 +138,32 @@ def search_news(query):
         return []
 
 # ==========================================
-# 4. AI 요약 (로그 추가됨)
+# 4. AI 요약 (사용자 요청: Gemini 2.5 적용)
 # ==========================================
 def summarize_news(news_list):
     if not news_list: return []
 
     print("\n" + "="*60)
-    print(f"[단계 3] AI(Gemini)에게 {len(news_list)}건 검수 및 요약 요청")
+    print(f"[단계 3] AI(Gemini 2.5)에게 {len(news_list)}건 검수 요청")
     
-    # 모델명: 404 에러 방지를 위해 latest 사용
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_KEY}"
+    # [수정] 사용자 요청대로 gemini-2.5-flash 모델 URL 적용
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
-    너는 대한민국 최고의 'IT 보안 전문 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
+    너는 대한민국 'IT 보안 전문 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
     
     [작업 지시]
-    다음 뉴스 목록을 엄격히 심사하여 '정보보호, 해킹, 보안'과 직접 관련된 뉴스만 남겨라.
-    스포츠, 연예, 단순 주식 시황은 삭제해라.
-    남은 기사는 한국어로 3줄 요약해라.
-    결과는 오직 JSON 리스트 포맷으로만 출력해라.
+    1. 다음 뉴스 목록에서 '정보보호, 해킹, 보안, 개인정보'와 직접 관련된 기사만 남겨라.
+    2. **[중요]** 스포츠(야구, 축구), 연예, 주식 시황 기사는 무조건 삭제해라.
+    3. 남은 기사는 한국어로 3줄 요약해라.
+    4. 결과는 오직 JSON 리스트 포맷으로만 출력해라.
 
     [입력 데이터]
     {json.dumps(news_list)}
     
-    [출력 예시]
-    [ {{ "title": "...", "source": "...", "summary": "...", "date": "...", "url": "..." }} ]
+    [출력 포맷]
+    [ {{ "title": "기사제목", "source": "언론사", "summary": "요약", "date": "날짜", "url": "링크" }} ]
     """
     
     data = {
@@ -162,29 +182,24 @@ def summarize_news(news_list):
         if response.status_code == 200:
             res_json = response.json()
             if 'candidates' not in res_json: 
-                print("❌ AI 응답에 'candidates' 필드가 없습니다. (차단되었거나 오류)")
-                print("응답 전문:", response.text)
+                print("❌ AI 응답 오류 (Candidates 없음)")
+                print(response.text)
                 return []
             
             text = res_json['candidates'][0]['content']['parts'][0]['text']
             
-            # JSON 파싱 시도
             start = text.find('[')
             end = text.rfind(']') + 1
-            if start == -1: 
-                print("❌ AI 응답에서 JSON 리스트를 찾을 수 없습니다.")
-                print("AI 응답 내용:", text)
-                return []
+            if start == -1: return []
             
             result = json.loads(text[start:end])
-            print(f"\n[결과 3] AI 최종 선정 기사: {len(result)}개")
+            print(f"\n[결과 3] AI 최종 선정: {len(result)}개")
             for i, item in enumerate(result):
-                print(f"  {i+1}. [선정] {item.get('title')}")
-            
+                print(f"  {i+1}. {item.get('title')}")
             return result
         else:
             print(f"❌ API Error: {response.status_code}")
-            print(f"메시지: {response.text}")
+            print(response.text)
             return []
     except Exception as e:
         print(f"❌ Summarize Error: {e}")
@@ -195,7 +210,7 @@ def summarize_news(news_list):
 # ==========================================
 def create_pdf(articles, filename, is_empty=False):
     print("\n" + "="*60)
-    print(f"[단계 4] PDF 생성 시작: {filename}")
+    print(f"[단계 4] PDF 생성: {filename}")
     pdf = FPDF()
     pdf.add_page()
     
@@ -211,13 +226,11 @@ def create_pdf(articles, filename, is_empty=False):
     pdf.ln(10)
 
     if is_empty or not articles:
-        print("  └ 내용: 뉴스 없음 (No news found)")
         pdf.set_font_size(12)
         pdf.multi_cell(0, 10, "No significant domestic security news found today.\n(주요 국내 보안 뉴스가 없습니다.)", align='C')
         pdf.output(filename)
         return
 
-    print(f"  └ 내용: {len(articles)}개 기사 수록 중...")
     for idx, article in enumerate(articles, 1):
         source_name = article.get('source', 'News')
         title_text = f"{idx}. {article['title']} ({source_name})"
@@ -261,21 +274,17 @@ def create_pdf(articles, filename, is_empty=False):
         pdf.ln(5)
 
     pdf.output(filename)
-    print("  └ PDF 생성 완료.")
+    print("  └ PDF 생성 완료")
 
 # ==========================================
 # 6. 이메일 발송
 # ==========================================
 def send_email(pdf_filename):
     print("\n" + "="*60)
-    print("[단계 5] 이메일 발송 시도")
+    print("[단계 5] 이메일 발송")
     
-    if not os.path.exists(pdf_filename): 
-        print(f"❌ 발송 실패: 파일 없음 ({pdf_filename})")
-        return
-    if not RECIPIENTS: 
-        print("❌ 발송 실패: 수신자 리스트 없음")
-        return
+    if not os.path.exists(pdf_filename): return
+    if not RECIPIENTS: return
 
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
@@ -286,8 +295,8 @@ def send_email(pdf_filename):
     안녕하세요.
     {TODAY_STR}일자 국내 주요 보안 뉴스 브리핑입니다.
     
-    국내 주요 IT/보안 언론사 {len(TARGET_DOMAINS)}곳을 대상으로
-    AI가 선별 및 요약한 내용을 첨부드립니다.
+    영문 기사 및 스포츠 기사를 제외하고,
+    국내 주요 언론사의 보안 뉴스만을 선별했습니다.
     
     감사합니다.
     """
@@ -307,7 +316,7 @@ def send_email(pdf_filename):
         server.login(EMAIL_USER, EMAIL_PASS)
         server.send_message(msg)
         server.quit()
-        print(f"✅ 메일 발송 완료: {len(RECIPIENTS)}명에게 전송됨.")
+        print(f"✅ 메일 발송 완료: {len(RECIPIENTS)}명")
     except Exception as e:
         print(f"❌ Email Error: {e}")
 
@@ -316,22 +325,17 @@ def send_email(pdf_filename):
 # ==========================================
 if __name__ == "__main__":
     try:
-        # 1. 뉴스 검색
         news_data = search_news("") 
         
         final_data = []
         if news_data:
-            # 2. AI 필터링 및 요약
             final_data = summarize_news(news_data)
-        else:
-            print("\n[알림] 1차 검색 결과가 0건입니다.")
         
-        # 3. 결과 처리
         if final_data:
             create_pdf(final_data, PDF_FILENAME, is_empty=False)
             send_email(PDF_FILENAME)
         else:
-            print("\n[알림] 최종 선정된 뉴스가 없습니다. '뉴스 없음' PDF를 생성합니다.")
+            print("\n[알림] 최종 선정된 뉴스가 없습니다. '뉴스 없음' PDF 생성.")
             create_pdf([], PDF_FILENAME, is_empty=True)
             # send_email(PDF_FILENAME)
 
