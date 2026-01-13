@@ -115,58 +115,82 @@ def search_news(query):
     return final_selection
 
 
-# 5. AI 상세 요약 (보안 관련성 검증 및 번역 기능 추가)
+# 5. AI 상세 요약 (안전 필터 해제 + JSON 추출 강화)
 def summarize_news(news_list):
     if not news_list:
         return []
 
-    print("Gemini에게 요약 및 검수(야구 기사 제외) 요청 중...")
+    print(f"Gemini에게 {len(news_list)}건의 기사 요약 및 검수 요청 중...")
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # 프롬프트 대폭 강화: '엄격한 필터링'과 '번역' 지시 추가
     prompt = f"""
-    너는 까다로운 '보안 뉴스 전문 편집장'이야. 
-    제공된 뉴스 데이터(JSON)를 검토해서 다음 규칙을 엄격하게 적용해:
-
-    1. [필터링]: 기사 내용이 '정보보호', '해킹', '개인정보 유출', '사이버 보안', 'IT 정책'과 직접적인 관련이 없다면 과감히 버려. 
-       (특히 야구, 축구, 스포츠, 연예, 단순 사건사고는 절대 포함하지 마.)
+    너는 보안 뉴스 편집장이야. 아래 뉴스 데이터를 분석해 JSON 리스트로 반환해.
     
-    2. [번역]: 기사 제목이나 내용이 영어라면, 반드시 자연스러운 '한국어'로 번역해.
+    [규칙]
+    1. 주제 필터링: '정보보호', '해킹', '보안', '개인정보', 'IT정책' 관련 기사만 남기고 나머지는 버려.
+    2. 언어: 모든 내용은 반드시 '한국어'로 작성해.
+    3. 형식: 오직 JSON 리스트만 출력해. (마크다운이나 설명 금지)
     
-    3. [요약]: 살아남은 보안 기사들에 대해서만 핵심 내용을 3줄로 요약해.
-    
-    4. [형식]: '제목(title)', '요약(summary)', '링크(url)' 키를 가진 JSON 리스트로 반환해. 링크는 원본 그대로 유지해.
-    
-    [검토할 뉴스 목록]
+    [입력 데이터]
     {json.dumps(news_list)}
     
     [출력 예시]
     [
-        {{"title": "한국어 제목", "summary": "한국어 요약 내용...", "url": "http://original-link.com"}},
+        {{"title": "한국어 기사 제목", "summary": "3줄 요약 내용", "url": "http://..."}},
         ...
     ]
-    만약 보안 관련 기사가 하나도 없다면 빈 리스트 [] 를 반환해.
     """
     
-    data = {"contents": [{"parts": [{"text": prompt}]}]}
-    response = requests.post(url, headers=headers, json=data)
+    # ★ 안전 설정 추가: 해킹 뉴스라고 차단하지 않도록 모든 필터 해제 (BLOCK_NONE)
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
     
-    if response.status_code == 200:
-        try:
-            text = response.json()['candidates'][0]['content']['parts'][0]['text']
-            text = text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(text)
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "safetySettings": safety_settings
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            res_json = response.json()
             
-            # 필터링 결과 로그 출력
-            print(f"AI 검수 완료: {len(news_list)}개 중 {len(result)}개(보안 관련)만 통과.")
+            # 답변 후보가 있는지 확인
+            if 'candidates' not in res_json or not res_json['candidates']:
+                print("오류: AI가 답변을 생성하지 않았습니다. (안전 필터 등 원인)")
+                print(f"디버그 정보: {res_json}")
+                return []
+                
+            text = res_json['candidates'][0]['content']['parts'][0]['text']
+            
+            # ★ 강력한 JSON 추출 로직 (앞뒤 잡담 잘라내기)
+            start_index = text.find('[')
+            end_index = text.rfind(']') + 1
+            
+            if start_index == -1 or end_index == 0:
+                print("오류: AI 답변에서 JSON 리스트를 찾을 수 없습니다.")
+                print(f"AI 원본 답변: {text[:100]}...") # 앞부분만 로그 출력
+                return []
+                
+            clean_json_text = text[start_index:end_index]
+            result = json.loads(clean_json_text)
+            
+            print(f"AI 검수 완료: {len(result)}개 기사 선정됨.")
             return result
-        except Exception as e:
-            print(f"JSON 파싱 실패: {e}")
+            
+        else:
+            print(f"API 호출 에러: {response.status_code} - {response.text}")
             return []
-    else:
-        print(f"API 에러: {response.text}")
+            
+    except Exception as e:
+        print(f"요약 처리 중 예외 발생: {str(e)}")
         return []
 
 # 6. PDF 생성
