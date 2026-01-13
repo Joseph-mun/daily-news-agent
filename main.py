@@ -237,3 +237,70 @@ def create_pdf(articles, filename):
         pdf.set_text_color(0, 0, 0)
         
         pdf.ln(15)
+        if os.path.exists(qr_filename):
+            os.remove(qr_filename)
+        
+        # 구분선
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(5)
+
+    pdf.output(filename)
+
+# ==========================================
+# 6. 이메일 발송
+# ==========================================
+def send_email(pdf_filename):
+    if not os.path.exists(pdf_filename): 
+        return
+    if not RECIPIENTS: 
+        return
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_USER
+    msg['To'] = ", ".join(RECIPIENTS)
+    msg['Subject'] = Header(f"[{TODAY_STR}] 주요 정보보호 뉴스 브리핑", 'utf-8')
+
+    body = f"안녕하세요.\n{TODAY_STR}일자 주요 보안 뉴스 브리핑입니다.\n\nAI가 선별한 주요 기사가 첨부파일(PDF)에 담겨있습니다.\n확인 부탁드립니다."
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    with open(pdf_filename, "rb") as f:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', 'attachment', filename=Header(pdf_filename, 'utf-8').encode())
+        msg.attach(part)
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.send_message(msg)
+        server.quit()
+        print(f"메일 발송 완료: {len(RECIPIENTS)}명")
+    except Exception as e:
+        print(f"Email Error: {e}")
+
+# ==========================================
+# 7. 메인 실행
+# ==========================================
+if __name__ == "__main__":
+    try:
+        # 1. 검색 (Python 필터링 없이 수집)
+        news_data = search_news("") 
+        
+        if news_data:
+            # 2. AI에게 필터링과 요약을 동시에 요청
+            analyzed_data = summarize_news(news_data)
+            
+            if analyzed_data:
+                # 3. 결과가 있을 때만 PDF 및 메일 발송
+                create_pdf(analyzed_data, PDF_FILENAME)
+                send_email(PDF_FILENAME)
+            else:
+                print("결과 없음: AI가 모든 기사를 필터링(제외)했습니다.")
+        else:
+            print("검색 결과 없음")
+            
+    except Exception as e:
+        print(f"Critical Error: {e}")
