@@ -247,7 +247,7 @@ def create_pdf(articles, filename):
         pdf.image(qr_filename, x=170, y=y_pos, w=20)
         
         pdf.set_text_color(0, 102, 204)
-        pdf.cell(0, 5, "[Link]", ln=True, link=article['url'])
+        pdf.cell(0, 5, "[Link Click or QR code]", ln=True, link=article['url'])
         pdf.set_text_color(0, 0, 0)
         
         pdf.ln(15)
