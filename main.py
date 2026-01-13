@@ -24,7 +24,7 @@ def search_news(query):
 # 3. AI 요약 함수 (Gemini)
 def summarize_news(news_list):
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
     
     prompt = f"""
     다음 뉴스들을 '일일 정보보호 브리핑' 보고서용으로 요약해줘.
