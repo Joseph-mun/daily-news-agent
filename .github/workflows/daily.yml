@@ -34,7 +34,7 @@ jobs:
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: python main.py
 
-- name: 히스토리 저장 (Commit & Push)
+    - name: 히스토리 저장 (Commit & Push)
       run: |
         git config --global user.name "NewsBot"
         git config --global user.email "bot@noreply.github.com"
