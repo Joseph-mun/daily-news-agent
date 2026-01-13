@@ -121,7 +121,7 @@ def search_news(query):
 
     return final_selection
 
-# 5. AI 상세 요약 (디버깅 로그 강화 버전)
+# 5. AI 상세 요약 (필터링 제거: 무조건 요약 모드)
 def summarize_news(news_list):
     if not news_list:
         return []
@@ -131,13 +131,14 @@ def summarize_news(news_list):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # 프롬프트 수정: "관련 기사만 남겨" -> "모든 기사를 요약해" 로 변경
     prompt = f"""
     너는 보안 뉴스 전문 편집장이야. 아래 뉴스 데이터를 분석해 JSON 리스트로 반환해.
     
     [규칙]
-    1. 주제 필터링: '정보보호', '해킹', '보안', '개인정보', 'IT정책' 관련 기사만 남겨.
+    1. 분석 대상: 필터링하지 말고, 입력된 '모든' 기사를 포함해서 요약해.
     2. 언어: 내용은 반드시 '한국어'로 작성해.
-    3. 형식: 오직 JSON 리스트만 출력해. (마크다운 코드블럭 ```json 없이 순수 텍스트로만)
+    3. 형식: 오직 JSON 리스트만 출력해. (설명이나 마크다운 없이)
     
     [입력 데이터]
     {json.dumps(news_list)}
@@ -168,15 +169,14 @@ def summarize_news(news_list):
         if response.status_code == 200:
             res_json = response.json()
             
-            # 1. 답변 자체가 비어있는 경우
             if 'candidates' not in res_json or not res_json['candidates']:
-                print("🚨 오류: AI가 답변을 생성하지 않았습니다. (Finish Reason 확인 필요)")
+                print("🚨 오류: AI가 답변을 생성하지 않았습니다.")
                 print(f"응답 원본: {res_json}")
                 return []
                 
             text = res_json['candidates'][0]['content']['parts'][0]['text']
             
-            # 2. JSON 파싱 시도
+            # JSON 파싱 시도
             start_index = text.find('[')
             end_index = text.rfind(']') + 1
             
