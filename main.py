@@ -108,31 +108,40 @@ def search_news(query):
 
     return final_selection
 
-# 5. AI 상세 요약
+
+# 5. AI 상세 요약 (보안 관련성 검증 및 번역 기능 추가)
 def summarize_news(news_list):
     if not news_list:
         return []
 
-    print("Gemini에게 요약 요청 중...")
+    print("Gemini에게 요약 및 검수(야구 기사 제외) 요청 중...")
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # 프롬프트 대폭 강화: '엄격한 필터링'과 '번역' 지시 추가
     prompt = f"""
-    너는 보안 뉴스 큐레이터야. 제공된 뉴스 데이터(JSON)를 바탕으로 다음 작업을 수행해:
+    너는 까다로운 '보안 뉴스 전문 편집장'이야. 
+    제공된 뉴스 데이터(JSON)를 검토해서 다음 규칙을 엄격하게 적용해:
+
+    1. [필터링]: 기사 내용이 '정보보호', '해킹', '개인정보 유출', '사이버 보안', 'IT 정책'과 직접적인 관련이 없다면 과감히 버려. 
+       (특히 야구, 축구, 스포츠, 연예, 단순 사건사고는 절대 포함하지 마.)
     
-    1. 각 뉴스의 내용을 분석하여 3줄 이내로 핵심을 요약해.
-    2. '제목(title)'과 '링크(url)'는 절대 변경하지 말고 원본 데이터 그대로 사용해.
-    3. 결과는 반드시 JSON 리스트 형식으로만 출력해.
+    2. [번역]: 기사 제목이나 내용이 영어라면, 반드시 자연스러운 '한국어'로 번역해.
     
-    [입력 데이터]
+    3. [요약]: 살아남은 보안 기사들에 대해서만 핵심 내용을 3줄로 요약해.
+    
+    4. [형식]: '제목(title)', '요약(summary)', '링크(url)' 키를 가진 JSON 리스트로 반환해. 링크는 원본 그대로 유지해.
+    
+    [검토할 뉴스 목록]
     {json.dumps(news_list)}
     
     [출력 예시]
     [
-        {{"title": "기사 제목", "summary": "요약 내용", "url": "http://..."}},
+        {{"title": "한국어 제목", "summary": "한국어 요약 내용...", "url": "http://original-link.com"}},
         ...
     ]
+    만약 보안 관련 기사가 하나도 없다면 빈 리스트 [] 를 반환해.
     """
     
     data = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -142,7 +151,11 @@ def summarize_news(news_list):
         try:
             text = response.json()['candidates'][0]['content']['parts'][0]['text']
             text = text.replace("```json", "").replace("```", "").strip()
-            return json.loads(text)
+            result = json.loads(text)
+            
+            # 필터링 결과 로그 출력
+            print(f"AI 검수 완료: {len(news_list)}개 중 {len(result)}개(보안 관련)만 통과.")
+            return result
         except Exception as e:
             print(f"JSON 파싱 실패: {e}")
             return []
