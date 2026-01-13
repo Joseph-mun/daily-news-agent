@@ -1,61 +1,64 @@
 name: Daily Security Briefing
 
 on:
+  # 1. 스케줄 실행 (한국 시간 아침 07:30 = UTC 전날 22:30)
   schedule:
-    # 한국 시간 아침 8시 = UTC 23시 (전날)
     - cron: '30 22 * * *'
-  workflow_dispatch: # 수동 실행 버튼 추가
-
-permissions:
-  contents: write
+  
+  # 2. 수동 실행 버튼 활성화
+  workflow_dispatch:
 
 jobs:
-  run-agent:
+  run-briefing:
     runs-on: ubuntu-latest
+    
+    # 로그 시간을 한국 시간으로 표시
+    env:
+      TZ: 'Asia/Seoul'
 
     steps:
-    - name: 저장소 코드 가져오기
-      uses: actions/checkout@v3
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v3
 
-    - name: 파이썬 설정
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: 파이썬 설정 (3.9 버전)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: 라이브러리 설치
-      run: |
-        pip install -r requirements.txt
+      - name: 필요 라이브러리 설치
+        run: |
+          pip install requests tavily-python google-generativeai fpdf qrcode
 
-# (선택 사항) 결과물 탭에 PDF 임시 업로드
-    - name: PDF 결과물 업로드
-      uses: actions/upload-artifact@v4
-      with:
-        name: Daily-Briefing-PDF
-        path: "*.pdf"
-        retention-days: 30
+      - name: 뉴스 브리핑 실행
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+        run: |
+          python main.py
+      
+      - name: 결과물(PDF) 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: Security-Briefing-PDF
+          path: output/*.pdf
+          retention-days: 3
 
-
-    - name: 에이전트 실행
-      env:
-        TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        EMAIL_USER: ${{ secrets.EMAIL_USER }}
-        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-      run: python main.py
-
-    - name: 변경사항(히스토리) 저장 및 푸시
+      - name: 변경사항(히스토리) 저장 및 푸시
         run: |
           git config --global user.name "NewsBot"
           git config --global user.email "newsbot@noreply.github.com"
           
-          # 히스토리 파일만 저장 (PDF는 용량 문제로 Git에 올리지 않는 것을 추천하지만, 원하시면 추가하세요)
+          # 히스토리 파일만 저장
           git add data/history.json
           
-          # 변경사항이 있을 때만 커밋
+          # 변경사항이 있을 때만 커밋 (없으면 0으로 종료)
           git commit -m "Update history logs [skip ci]" || exit 0
           
-          # [핵심 해결책] 원격 저장소의 최신 내용을 먼저 가져와서 합칩니다.
+          # [핵심] 원격 저장소 내용을 먼저 당겨와서(Rebase) 충돌 방지
           git pull --rebase
           
-          # 그 다음 밀어넣습니다.
+          # 푸시 진행
           git push
