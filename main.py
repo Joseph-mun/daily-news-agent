@@ -38,22 +38,29 @@ TODAY_STR = NOW.strftime("%Y-%m-%d")
 TODAY_COMPACT = NOW.strftime("%Y%m%d")
 PDF_FILENAME = os.path.join(OUTPUT_DIR, f"주요 뉴스 요약_{TODAY_COMPACT}.pdf")
 
-# [검색 대상] 네이버 뉴스 및 국내 주요 IT/보안 언론사
+# [핵심 변경] 테스트에서 검증된 'IT/보안 전문지' 위주의 도메인 리스트
 TARGET_DOMAINS = [
-    "news.naver.com", "boannews.com", "dailysecu.com", "etnews.com", "zdnet.co.kr", 
-    "datanet.co.kr", "ddaily.co.kr", "digitaltoday.co.kr", "bloter.net", 
-    "itworld.co.kr", "ciokorea.com", "byline.network",
-    "yna.co.kr", "news1.kr", "newsis.com",
-    "mk.co.kr", "hankyung.com", "mt.co.kr", "fnnews.com", "sedaily.com",
-    "chosun.com", "joongang.co.kr", "donga.com", "hani.co.kr", "khan.co.kr"
+    "news.naver.com",      # 네이버 뉴스
+    "boannews.com",        # 보안뉴스
+    "dailysecu.com",       # 데일리시큐
+    "etnews.com",          # 전자신문
+    "zdnet.co.kr",         # 지디넷코리아
+    "datanet.co.kr",       # 데이터넷
+    "ddaily.co.kr",        # 디지털데일리
+    "digitaltoday.co.kr",  # 디지털투데이
+    "bloter.net",          # 블로터
+    "itworld.co.kr",       # ITWorld
+    "byline.network",      # 바이라인네트워크
+    "ciokorea.com"         # CIO Korea
 ]
 
 # ==========================================
-# 2. 유틸리티 함수 (영어 기사 필터링 추가)
+# 2. 유틸리티 함수 (영문 필터링 안전장치 유지)
 # ==========================================
 def is_korean_article(url):
     """URL에 영어 섹션(/en/, /english/)이 포함되어 있으면 False 반환"""
     url_lower = url.lower()
+    # 도메인을 좁혔지만 혹시 모를 영문 기사 유입을 방지하기 위한 2차 방어선
     exclude_patterns = [
         "/en/", "/english/", "/world-en/", "/sports-en/", 
         "cnn.com", "bbc.com", "reuters.com"
@@ -78,10 +85,9 @@ def filter_new_articles(results):
     for item in results:
         url = item.get('url', '')
         
-        # 1. 영문 기사 필터링 (파이썬에서 처리)
+        # 1. 영문 기사 필터링
         if not is_korean_article(url):
             english_dropped += 1
-            # print(f"  - [제외] 영문 기사: {item.get('title')}")
             continue
             
         # 2. 히스토리 중복 필터링
@@ -97,15 +103,15 @@ def filter_new_articles(results):
     return new_results, history
 
 # ==========================================
-# 3. 뉴스 검색
+# 3. 뉴스 검색 (테스트된 로직 적용)
 # ==========================================
 def search_news(query):
-    # 한글 키워드 위주로 검색
-    optimized_query = "정보보호 해킹 개인정보유출 사이버보안 랜섬웨어 (뉴스 OR 보도)"
+    # 테스트에서 성공한 검색어
+    optimized_query = "정보보호 OR 해킹 OR 개인정보유출 OR 사이버보안 OR 랜섬웨어"
     
     print("="*60)
     print(f"[단계 1] Tavily 검색 시작: '{optimized_query}'")
-    print(f"  └ 대상: 국내 {len(TARGET_DOMAINS)}개 언론사 (Naver News 포함)")
+    print(f"  └ 대상 도메인: {len(TARGET_DOMAINS)}개 (IT/보안 전문지)")
     
     try:
         tavily = TavilyClient(api_key=TAVILY_KEY)
@@ -115,8 +121,7 @@ def search_news(query):
             topic="news",
             search_depth="advanced",
             include_domains=TARGET_DOMAINS, 
-            max_results=50, 
-            days=3 
+            max_results=100
         )
         
         raw_results = response.get('results', [])
@@ -138,7 +143,7 @@ def search_news(query):
         return []
 
 # ==========================================
-# 4. AI 요약 (사용자 요청: Gemini 2.5 적용)
+# 4. AI 요약 (사용자 지정: Gemini 2.5)
 # ==========================================
 def summarize_news(news_list):
     if not news_list: return []
@@ -146,18 +151,20 @@ def summarize_news(news_list):
     print("\n" + "="*60)
     print(f"[단계 3] AI(Gemini 2.5)에게 {len(news_list)}건 검수 요청")
     
-    # [수정] 사용자 요청대로 gemini-2.5-flash 모델 URL 적용
+    # [지정] gemini-2.5-flash 모델 URL 사용
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
-    너는 대한민국 'IT 보안 전문 뉴스 편집장'이다. 오늘 날짜: {TODAY_STR}
+    너는 깐깐한 '보안 뉴스 편집장'이야. 
+    오늘은 [ {today_str} ] 이야. 이 날짜를 기준으로 뉴스를 검수해.
     
     [작업 지시]
-    1. 다음 뉴스 목록에서 '정보보호, 해킹, 보안, 개인정보'와 직접 관련된 기사만 남겨라.
-    2. **[중요]** 스포츠(야구, 축구), 연예, 주식 시황 기사는 무조건 삭제해라.
-    3. 남은 기사는 한국어로 3줄 요약해라.
-    4. 결과는 오직 JSON 리스트 포맷으로만 출력해라.
+    1. 날짜 확인: 기사 내용이나 메타데이터를 보고, 오늘({today_str}) 기준으로 '2일 이내' 기사만 남겨. 
+       (작년 기사나, 1주일 넘은 기사는 과감히 삭제해.)
+    2. 주제 확인: '정보보호', '해킹', '보안' 관련 내용만 남겨. (스포츠, 단순홍보 제외)
+    3. 요약 작성: 핵심 내용을 한국어로 3줄 요약해.
+    4. 날짜 추출: 기사의 발행일(YYYY-MM-DD)을 찾아서 'date' 필드에 넣어줘.
 
     [입력 데이터]
     {json.dumps(news_list)}
@@ -295,8 +302,7 @@ def send_email(pdf_filename):
     안녕하세요.
     {TODAY_STR}일자 국내 주요 보안 뉴스 브리핑입니다.
     
-    영문 기사 및 스포츠 기사를 제외하고,
-    국내 주요 언론사의 보안 뉴스만을 선별했습니다.
+    국내 주요 IT/보안 전문지의 최신 보안 뉴스만을 선별했습니다.
     
     감사합니다.
     """
@@ -325,12 +331,15 @@ def send_email(pdf_filename):
 # ==========================================
 if __name__ == "__main__":
     try:
+        # 1. 뉴스 검색
         news_data = search_news("") 
         
         final_data = []
         if news_data:
+            # 2. AI 필터링 및 요약
             final_data = summarize_news(news_data)
         
+        # 3. 결과 처리
         if final_data:
             create_pdf(final_data, PDF_FILENAME, is_empty=False)
             send_email(PDF_FILENAME)
