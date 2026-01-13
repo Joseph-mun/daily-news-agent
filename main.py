@@ -4,7 +4,7 @@ import requests
 import json
 import qrcode
 from datetime import datetime, timedelta
-from dateutil import parser # 날짜 해석용 라이브러리
+from dateutil import parser
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -27,29 +27,24 @@ TARGET_DOMAINS = [
     "hani.co.kr", "chosun.com", "donga.com", "joongang.co.kr", "mk.co.kr"
 ]
 
-# 2. 날짜 검증 함수 (문지기 역할)
+# 2. 날짜 검증 함수 (수정됨: 날짜가 없으면 API를 믿고 통과)
 def is_recent_article(date_string, days_limit=2):
+    # 날짜 정보가 아예 없는 경우 -> API의 days 필터를 믿고 통과시킴 (수정된 부분)
     if not date_string:
-        return False # 날짜 없으면 탈락
+        return True 
     
     try:
-        # 다양한 날짜 형식을 자동으로 해석
         pub_date = parser.parse(date_string)
-        # 타임존 정보가 있다면 제거 (단순 비교를 위해)
         pub_date = pub_date.replace(tzinfo=None)
-        
-        # 현재 시간
         now = datetime.now()
-        
-        # 차이 계산
         diff = now - pub_date
         
-        # 미래의 날짜(내일자 신문 등)거나, 제한 기간 이내인 경우 통과
+        # 미래의 날짜거나, 제한 기간 이내인 경우 통과
         return diff.days <= days_limit and diff.days >= -1
         
     except Exception as e:
-        # 날짜 해석 실패시 안전하게 제외
-        return False
+        # 날짜 형식이 특이해서 해석 실패한 경우 -> 안전하게 통과시킴
+        return True
 
 # 3. 중복 기사 필터링
 def filter_new_articles(results):
@@ -63,51 +58,45 @@ def filter_new_articles(results):
         history = []
 
     new_results = []
-    
-    # 1차: URL 중복 검사
     for item in results:
         if item['url'] not in history:
             new_results.append(item)
-            # (여기서는 아직 history에 추가하지 않음, 최종 선택된 것만 추가할 예정)
             
     return new_results, history
 
-# 4. 뉴스 검색 (도메인 제한 + 날짜 2차 필터)
+# 4. 뉴스 검색 (수정됨: topic="news" 추가)
 def search_news(query):
-    print(f"'{query}' 검색 중 (최근 48시간 엄격 필터)...")
+    print(f"'{query}' 검색 중 (최근 48시간 뉴스 모드)...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     
-    # 1차 API 요청 (넉넉하게 20개 요청)
+    # ★ topic="news" 추가: 뉴스 전용 데이터를 요청하여 날짜 정확도 향상
     response = tavily.search(
         query=query, 
+        topic="news",  # <--- [핵심] 뉴스 모드로 설정
         search_depth="basic", 
         max_results=20, 
         include_domains=TARGET_DOMAINS,
-        days=3 # API에는 조금 여유있게 요청 (API가 시차 때문에 놓칠 수 있으므로)
+        days=2
     )
     
     raw_results = response['results']
     
-    # 2차 Python 날짜 필터링 (엄격하게 자르기)
     date_filtered_results = []
-    print(f"1차 검색결과: {len(raw_results)}개. 날짜 검증 시작...")
+    print(f"1차 검색결과: {len(raw_results)}개. 검증 시작...")
     
     for item in raw_results:
         pub_date = item.get('published_date')
         if is_recent_article(pub_date, days_limit=2):
             date_filtered_results.append(item)
         else:
+            # 날짜가 명확히 있고, 그게 오래된 경우에만 제외
             print(f"  - 제외됨(오래된 기사): {item['title']} ({pub_date})")
 
-    # 3차 중복 필터링
     final_candidates, history = filter_new_articles(date_filtered_results)
-    
-    # 결과가 10개를 넘으면 자르기
     final_selection = final_candidates[:10]
     
-    print(f"날짜 필터 후: {len(date_filtered_results)}개 -> 중복 제거 후 최종: {len(final_selection)}개")
+    print(f"필터링 후 남은 기사: {len(final_selection)}개")
 
-    # 최종 선택된 기사들만 히스토리에 기록
     for item in final_selection:
         history.append(item['url'])
         
@@ -219,7 +208,7 @@ def send_email(pdf_filename):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = TO_EMAIL
-    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 정보보호 뉴스 브리핑"
+    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 주요 정보보호 뉴스 브리핑"
 
     with open(pdf_filename, "rb") as f:
         part = MIMEBase('application', 'octet-stream')
@@ -236,7 +225,6 @@ def send_email(pdf_filename):
 
 if __name__ == "__main__":
     try:
-        # 키워드 확장
         news_data = search_news("정보보호 해킹 보안사고 개인정보유출")
         
         if not news_data:
