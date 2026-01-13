@@ -2,4 +2,4 @@ tavily-python
 requests
 fpdf
 qrcode[pil]
-python-dateutil  <-- 이 줄이 추가되었습니다!
+python-dateutil
