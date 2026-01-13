@@ -72,7 +72,8 @@ def search_news(query):
         query=query, 
         search_depth="basic", 
         max_results=10,
-        include_domains=TARGET_DOMAINS 
+        include_domains=TARGET_DOMAINS
+        days=1
     )
     
     filtered = filter_new_articles(response['results'])
