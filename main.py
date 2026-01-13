@@ -18,12 +18,26 @@ EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 TO_EMAIL = os.environ.get("TO_EMAIL") or EMAIL_USER
 
-# 중복 방지를 위한 히스토리 파일명
 HISTORY_FILE = "history.json"
 
-# 2. 중복 기사 필터링 함수 (핵심 로직)
+# ★ 검색할 주요 언론사 및 보안 전문지 리스트 (원하는 곳이 있으면 추가/삭제 가능)
+TARGET_DOMAINS = [
+    "yna.co.kr",        # 연합뉴스
+    "etnews.com",       # 전자신문
+    "zdnet.co.kr",      # ZDNet Korea
+    "boannews.com",     # 보안뉴스
+    "dailysecu.com",    # 데일리시큐
+    "datanet.co.kr",    # 데이터넷
+    "ddaily.co.kr",     # 디지털데일리
+    "hani.co.kr",       # 한겨레
+    "chosun.com",       # 조선일보
+    "donga.com",        # 동아일보
+    "joongang.co.kr",   # 중앙일보
+    "mk.co.kr"          # 매일경제
+]
+
+# 2. 중복 기사 필터링
 def filter_new_articles(results):
-    # 기존 기록 불러오기
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             try:
@@ -34,62 +48,63 @@ def filter_new_articles(results):
         history = []
 
     new_results = []
-    # 이미 보낸 URL인지 확인
     for item in results:
+        # URL이 이미 기록에 있으면 건너뜀
         if item['url'] not in history:
             new_results.append(item)
-            history.append(item['url']) # 기록에 추가
+            history.append(item['url'])
     
-    # 기록이 너무 길어지면 최근 500개만 유지
     if len(history) > 500:
         history = history[-500:]
         
-    # 변경된 기록 저장
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f)
         
     return new_results
 
-# 3. 뉴스 검색 (Top 10)
+# 3. 뉴스 검색 (도메인 제한 적용)
 def search_news(query):
-    print(f"'{query}' 검색 중...")
+    print(f"'{query}' 검색 중 (신뢰할 수 있는 언론사 기준)...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
-    # 3. 요청하신 대로 Top 10개 검색
-    response = tavily.search(query=query, search_depth="basic", max_results=10)
     
-    # 5. 중복 제거 실행
+    # include_domains 옵션으로 지정된 언론사에서만 검색
+    response = tavily.search(
+        query=query, 
+        search_depth="basic", 
+        max_results=10,
+        include_domains=TARGET_DOMAINS 
+    )
+    
     filtered = filter_new_articles(response['results'])
     print(f"검색된 {len(response['results'])}개 중 신규 기사 {len(filtered)}개를 찾았습니다.")
     return filtered
 
-# 4. AI 상세 요약
+# 4. AI 상세 요약 (제목 원문 유지)
 def summarize_news(news_list):
     if not news_list:
         return []
 
-    print("Gemini에게 상세 요약 요청 중...")
+    print("Gemini에게 요약 요청 중...")
     
-    # 모델: gemini-2.5-flash (사용자 환경에 맞춰진 최신 모델)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # JSON 형식으로 답변하라고 강제함
+    # 프롬프트 수정: 제목과 URL은 원본 유지 강조
     prompt = f"""
-    너는 보안 분석가야. 다음 뉴스 기사들을 분석해서 JSON 형식으로 반환해.
-    각 기사마다 다음 정보를 포함해야 해:
-    1. title: 기사 제목 (핵심을 담아 간결하게)
-    2. summary: 기사의 핵심 내용을 3문장 정도로 상세하게 요약
-    3. url: 기사 원문 링크 (제공된 url 그대로)
+    너는 보안 뉴스 큐레이터야. 제공된 뉴스 데이터(JSON)를 바탕으로 다음 작업을 수행해:
     
-    [기사 목록]
+    1. 각 뉴스의 내용을 분석하여 3줄 이내로 핵심을 요약해.
+    2. '제목(title)'과 '링크(url)'는 절대 변경하지 말고 원본 데이터 그대로 사용해.
+    3. 결과는 반드시 JSON 리스트 형식으로만 출력해.
+    
+    [입력 데이터]
     {json.dumps(news_list)}
     
-    [응답 형식 예시]
+    [출력 예시]
     [
-        {{"title": "북한 해킹 그룹의 신종 수법", "summary": "내용...", "url": "http://..."}},
+        {{"title": "원문 기사 제목 그대로", "summary": "AI가 요약한 내용...", "url": "http://original-link.com"}},
         ...
     ]
-    응답은 오직 JSON 리스트만 출력해. 마크다운 코드블럭(```json) 쓰지 마.
     """
     
     data = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -98,67 +113,73 @@ def summarize_news(news_list):
     if response.status_code == 200:
         try:
             text = response.json()['candidates'][0]['content']['parts'][0]['text']
-            # 혹시 마크다운이 섞여있을 경우 제거
             text = text.replace("```json", "").replace("```", "").strip()
             return json.loads(text)
         except Exception as e:
             print(f"JSON 파싱 실패: {e}")
-            return []
+            # 파싱 실패 시 원본 리스트라도 반환 시도 (요약 없이)
+            return [] 
     else:
         print(f"API 에러: {response.text}")
         return []
 
-# 5. PDF 생성 (Bold, QR코드 포함)
+# 5. PDF 생성 (디자인 개선)
 def create_pdf(articles, filename="briefing.pdf"):
     print("PDF 생성 중...")
     pdf = FPDF()
     pdf.add_page()
     
-    # 폰트 설정 (Bold 효과를 위해 폰트가 2개 필요하지만, 없으면 크기와 굵기 옵션으로 대체)
     if os.path.exists('NanumGothic.ttf'):
         pdf.add_font('Nanum', '', 'NanumGothic.ttf', uni=True)
         pdf.set_font('Nanum', '', 10)
     else:
         pdf.set_font("Arial", size=10)
 
-    pdf.cell(0, 10, f"Daily Security Briefing ({datetime.now().strftime('%Y-%m-%d')})", ln=True, align='C')
+    # 헤더
+    pdf.set_font_size(16)
+    pdf.cell(0, 10, f"Daily Security News ({datetime.now().strftime('%Y-%m-%d')})", ln=True, align='C')
+    pdf.set_font_size(10)
+    pdf.cell(0, 10, "Selected from Major Tech & Security Media", ln=True, align='C')
     pdf.ln(10)
 
     for idx, article in enumerate(articles, 1):
-        # 1. 제목 (Bold 처리 대신 크기를 키우고 진하게)
-        pdf.set_font_size(14)
-        # FPDF 기본 bold('B')는 폰트 파일이 bold를 지원해야 함. 
-        # 여기선 크기로 강조
+        # 1. 신문사 원문 제목 (강조)
+        pdf.set_font_size(13)
+        pdf.set_text_color(0, 51, 102) # 남색 계열
+        # 제목이 너무 길 경우를 대비해 multi_cell 사용하되 높이 조절
         pdf.multi_cell(0, 8, f"{idx}. {article['title']}")
         
-        # 2. 내용 요약
+        # 2. 요약 내용
         pdf.set_font_size(10)
+        pdf.set_text_color(0, 0, 0) # 검정
         pdf.ln(2)
         pdf.multi_cell(0, 6, article['summary'])
         pdf.ln(2)
         
-        # 4. QR코드 생성
+        # 3. QR 코드 (원문 링크 direct)
         qr_filename = f"qr_{idx}.png"
-        qr = qrcode.make(article['url'])
+        qr = qrcode.make(article['url']) # 여기서 원문 URL 사용됨
         qr.save(qr_filename)
         
-        # QR코드 삽입 (오른쪽 아래에 배치)
-        # 현재 Y 위치 저장
-        y_before_qr = pdf.get_y()
-        pdf.image(qr_filename, x=170, y=y_before_qr, w=20) # 우측 배치
+        # QR 코드 배치 (우측 하단)
+        y_pos = pdf.get_y()
+        # 페이지가 거의 다 찼으면 다음 페이지로 넘김
+        if y_pos > 250: 
+            pdf.add_page()
+            y_pos = pdf.get_y()
+
+        pdf.image(qr_filename, x=170, y=y_pos, w=20)
         
-        # URL 텍스트 출력
-        pdf.set_text_color(0, 0, 255) # 파란색
-        pdf.cell(0, 10, "Read More (Click or Scan) ->", ln=True, link=article['url'])
-        pdf.set_text_color(0, 0, 0) # 검은색 복귀
+        # 텍스트 링크
+        pdf.set_text_color(0, 102, 204) # 파란색
+        pdf.cell(0, 5, "[Read Original Article]", ln=True, link=article['url'])
+        pdf.set_text_color(0, 0, 0)
         
-        # QR코드 공간만큼 띄우기
         pdf.ln(15)
-        
-        # 임시 QR 파일 삭제
         os.remove(qr_filename)
         
         # 구분선
+        pdf.set_draw_color(200, 200, 200)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(5)
 
@@ -169,7 +190,7 @@ def send_email(pdf_filename):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = TO_EMAIL
-    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 보안 뉴스 브리핑 ({TO_EMAIL}님)"
+    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 주요 언론사 보안 뉴스 브리핑"
 
     with open(pdf_filename, "rb") as f:
         part = MIMEBase('application', 'octet-stream')
@@ -186,20 +207,18 @@ def send_email(pdf_filename):
 
 if __name__ == "__main__":
     try:
-        # 중복 방지 로직이 포함된 검색
-        news_data = search_news("정보보호 최신 뉴스")
+        news_data = search_news("정보보호 해킹 보안사고") # 키워드 살짝 보강
         
         if not news_data:
-            print("새로운 뉴스가 없습니다.")
+            print("조건에 맞는 새로운 뉴스가 없습니다.")
         else:
-            # AI 분석
             analyzed_data = summarize_news(news_data)
             if analyzed_data:
                 create_pdf(analyzed_data)
                 send_email("briefing.pdf")
                 print("발송 완료!")
             else:
-                print("요약할 데이터가 없습니다.")
+                print("요약 과정에서 문제가 발생했습니다.")
                 
     except Exception as e:
         print(f"오류 발생: {e}")
