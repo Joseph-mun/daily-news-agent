@@ -3,7 +3,8 @@ import smtplib
 import requests
 import json
 import qrcode
-from datetime import datetime
+from datetime import datetime, timedelta
+from dateutil import parser # 날짜 해석용 라이브러리
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -20,23 +21,37 @@ TO_EMAIL = os.environ.get("TO_EMAIL") or EMAIL_USER
 
 HISTORY_FILE = "history.json"
 
-# ★ 검색할 주요 언론사 및 보안 전문지 리스트 (원하는 곳이 있으면 추가/삭제 가능)
 TARGET_DOMAINS = [
-    "yna.co.kr",        # 연합뉴스
-    "etnews.com",       # 전자신문
-    "zdnet.co.kr",      # ZDNet Korea
-    "boannews.com",     # 보안뉴스
-    "dailysecu.com",    # 데일리시큐
-    "datanet.co.kr",    # 데이터넷
-    "ddaily.co.kr",     # 디지털데일리
-    "hani.co.kr",       # 한겨레
-    "chosun.com",       # 조선일보
-    "donga.com",        # 동아일보
-    "joongang.co.kr",   # 중앙일보
-    "mk.co.kr"          # 매일경제
+    "yna.co.kr", "etnews.com", "zdnet.co.kr", "boannews.com", 
+    "dailysecu.com", "datanet.co.kr", "ddaily.co.kr", 
+    "hani.co.kr", "chosun.com", "donga.com", "joongang.co.kr", "mk.co.kr"
 ]
 
-# 2. 중복 기사 필터링
+# 2. 날짜 검증 함수 (문지기 역할)
+def is_recent_article(date_string, days_limit=2):
+    if not date_string:
+        return False # 날짜 없으면 탈락
+    
+    try:
+        # 다양한 날짜 형식을 자동으로 해석
+        pub_date = parser.parse(date_string)
+        # 타임존 정보가 있다면 제거 (단순 비교를 위해)
+        pub_date = pub_date.replace(tzinfo=None)
+        
+        # 현재 시간
+        now = datetime.now()
+        
+        # 차이 계산
+        diff = now - pub_date
+        
+        # 미래의 날짜(내일자 신문 등)거나, 제한 기간 이내인 경우 통과
+        return diff.days <= days_limit and diff.days >= -1
+        
+    except Exception as e:
+        # 날짜 해석 실패시 안전하게 제외
+        return False
+
+# 3. 중복 기사 필터링
 def filter_new_articles(results):
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -48,47 +63,63 @@ def filter_new_articles(results):
         history = []
 
     new_results = []
+    
+    # 1차: URL 중복 검사
     for item in results:
-        # URL이 이미 기록에 있으면 건너뜀
         if item['url'] not in history:
             new_results.append(item)
-            history.append(item['url'])
+            # (여기서는 아직 history에 추가하지 않음, 최종 선택된 것만 추가할 예정)
+            
+    return new_results, history
+
+# 4. 뉴스 검색 (도메인 제한 + 날짜 2차 필터)
+def search_news(query):
+    print(f"'{query}' 검색 중 (최근 48시간 엄격 필터)...")
+    tavily = TavilyClient(api_key=TAVILY_KEY)
     
+    # 1차 API 요청 (넉넉하게 20개 요청)
+    response = tavily.search(
+        query=query, 
+        search_depth="basic", 
+        max_results=20, 
+        include_domains=TARGET_DOMAINS,
+        days=3 # API에는 조금 여유있게 요청 (API가 시차 때문에 놓칠 수 있으므로)
+    )
+    
+    raw_results = response['results']
+    
+    # 2차 Python 날짜 필터링 (엄격하게 자르기)
+    date_filtered_results = []
+    print(f"1차 검색결과: {len(raw_results)}개. 날짜 검증 시작...")
+    
+    for item in raw_results:
+        pub_date = item.get('published_date')
+        if is_recent_article(pub_date, days_limit=2):
+            date_filtered_results.append(item)
+        else:
+            print(f"  - 제외됨(오래된 기사): {item['title']} ({pub_date})")
+
+    # 3차 중복 필터링
+    final_candidates, history = filter_new_articles(date_filtered_results)
+    
+    # 결과가 10개를 넘으면 자르기
+    final_selection = final_candidates[:10]
+    
+    print(f"날짜 필터 후: {len(date_filtered_results)}개 -> 중복 제거 후 최종: {len(final_selection)}개")
+
+    # 최종 선택된 기사들만 히스토리에 기록
+    for item in final_selection:
+        history.append(item['url'])
+        
     if len(history) > 500:
         history = history[-500:]
         
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f)
-        
-    return new_results
 
-# 3. 뉴스 검색 (설정 강화: 최근 2일 & 검색량 증대)
-def search_news(query):
-    # days=2로 설정 (오늘 ~ 어제 기사까지)
-    # max_results=15 (필터링 될 것을 고려해 넉넉하게 요청)
-    print(f"'{query}' 검색 중 (최근 48시간 & 주요 언론사)...")
-    tavily = TavilyClient(api_key=TAVILY_KEY)
-    
-    response = tavily.search(
-        query=query, 
-        search_depth="basic", 
-        max_results=15,                 # 요청 개수를 늘림
-        include_domains=TARGET_DOMAINS,
-        days=2                          # 1은 너무 적을 수 있어서 2(오늘+어제) 추천
-    )
-    
-    # 전체 검색 결과와 신규 기사 개수를 비교해서 로그로 출력
-    total_found = len(response['results'])
-    filtered = filter_new_articles(response['results'])
-    new_found = len(filtered)
-    
-    print(f"Tavily 검색 결과: {total_found}개")
-    print(f"중복 제거 후 남은 기사: {new_found}개")
-    
-    # 만약 남은 게 너무 많으면 10개로 자름
-    return filtered[:10]
+    return final_selection
 
-# 4. AI 상세 요약 (제목 원문 유지)
+# 5. AI 상세 요약
 def summarize_news(news_list):
     if not news_list:
         return []
@@ -98,7 +129,6 @@ def summarize_news(news_list):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # 프롬프트 수정: 제목과 URL은 원본 유지 강조
     prompt = f"""
     너는 보안 뉴스 큐레이터야. 제공된 뉴스 데이터(JSON)를 바탕으로 다음 작업을 수행해:
     
@@ -111,7 +141,7 @@ def summarize_news(news_list):
     
     [출력 예시]
     [
-        {{"title": "원문 기사 제목 그대로", "summary": "AI가 요약한 내용...", "url": "http://original-link.com"}},
+        {{"title": "기사 제목", "summary": "요약 내용", "url": "http://..."}},
         ...
     ]
     """
@@ -126,13 +156,12 @@ def summarize_news(news_list):
             return json.loads(text)
         except Exception as e:
             print(f"JSON 파싱 실패: {e}")
-            # 파싱 실패 시 원본 리스트라도 반환 시도 (요약 없이)
-            return [] 
+            return []
     else:
         print(f"API 에러: {response.text}")
         return []
 
-# 5. PDF 생성 (디자인 개선)
+# 6. PDF 생성
 def create_pdf(articles, filename="briefing.pdf"):
     print("PDF 생성 중...")
     pdf = FPDF()
@@ -144,7 +173,6 @@ def create_pdf(articles, filename="briefing.pdf"):
     else:
         pdf.set_font("Arial", size=10)
 
-    # 헤더
     pdf.set_font_size(16)
     pdf.cell(0, 10, f"Daily Security News ({datetime.now().strftime('%Y-%m-%d')})", ln=True, align='C')
     pdf.set_font_size(10)
@@ -152,54 +180,46 @@ def create_pdf(articles, filename="briefing.pdf"):
     pdf.ln(10)
 
     for idx, article in enumerate(articles, 1):
-        # 1. 신문사 원문 제목 (강조)
         pdf.set_font_size(13)
-        pdf.set_text_color(0, 51, 102) # 남색 계열
-        # 제목이 너무 길 경우를 대비해 multi_cell 사용하되 높이 조절
+        pdf.set_text_color(0, 51, 102)
         pdf.multi_cell(0, 8, f"{idx}. {article['title']}")
         
-        # 2. 요약 내용
         pdf.set_font_size(10)
-        pdf.set_text_color(0, 0, 0) # 검정
+        pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
         pdf.multi_cell(0, 6, article['summary'])
         pdf.ln(2)
         
-        # 3. QR 코드 (원문 링크 direct)
         qr_filename = f"qr_{idx}.png"
-        qr = qrcode.make(article['url']) # 여기서 원문 URL 사용됨
+        qr = qrcode.make(article['url'])
         qr.save(qr_filename)
         
-        # QR 코드 배치 (우측 하단)
         y_pos = pdf.get_y()
-        # 페이지가 거의 다 찼으면 다음 페이지로 넘김
         if y_pos > 250: 
             pdf.add_page()
             y_pos = pdf.get_y()
 
         pdf.image(qr_filename, x=170, y=y_pos, w=20)
         
-        # 텍스트 링크
-        pdf.set_text_color(0, 102, 204) # 파란색
+        pdf.set_text_color(0, 102, 204)
         pdf.cell(0, 5, "[Read Original Article]", ln=True, link=article['url'])
         pdf.set_text_color(0, 0, 0)
         
         pdf.ln(15)
         os.remove(qr_filename)
         
-        # 구분선
         pdf.set_draw_color(200, 200, 200)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(5)
 
     pdf.output(filename)
 
-# 6. 이메일 발송
+# 7. 이메일 발송
 def send_email(pdf_filename):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = TO_EMAIL
-    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 주요 언론사 보안 뉴스 브리핑"
+    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 정보보호 뉴스 브리핑"
 
     with open(pdf_filename, "rb") as f:
         part = MIMEBase('application', 'octet-stream')
@@ -216,7 +236,8 @@ def send_email(pdf_filename):
 
 if __name__ == "__main__":
     try:
-        news_data = search_news("정보보호 해킹 보안사고") # 키워드 살짝 보강
+        # 키워드 확장
+        news_data = search_news("정보보호 해킹 보안사고 개인정보유출")
         
         if not news_data:
             print("조건에 맞는 새로운 뉴스가 없습니다.")
@@ -227,7 +248,7 @@ if __name__ == "__main__":
                 send_email("briefing.pdf")
                 print("발송 완료!")
             else:
-                print("요약 과정에서 문제가 발생했습니다.")
+                print("요약할 데이터가 없습니다.")
                 
     except Exception as e:
         print(f"오류 발생: {e}")
