@@ -43,12 +43,19 @@ jobs:
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: python main.py
 
-    - name: 히스토리 저장 (Commit & Push)
-      run: |
-        git config --global user.name "NewsBot"
-        git config --global user.email "bot@noreply.github.com"
-        # 특정 파일 대신, 현재 폴더의 모든 변경사항을 담습니다.
-        git add .
-        # 변경된 게 없으면 에러 내지 않고 그냥 넘어갑니다.
-        git diff --staged --quiet || git commit -m "Update history and logs"
-        git push
+    - name: 변경사항(히스토리) 저장 및 푸시
+        run: |
+          git config --global user.name "NewsBot"
+          git config --global user.email "newsbot@noreply.github.com"
+          
+          # 히스토리 파일만 저장 (PDF는 용량 문제로 Git에 올리지 않는 것을 추천하지만, 원하시면 추가하세요)
+          git add data/history.json
+          
+          # 변경사항이 있을 때만 커밋
+          git commit -m "Update history logs [skip ci]" || exit 0
+          
+          # [핵심 해결책] 원격 저장소의 최신 내용을 먼저 가져와서 합칩니다.
+          git pull --rebase
+          
+          # 그 다음 밀어넣습니다.
+          git push
