@@ -46,8 +46,8 @@ def get_available_models():
 def summarize_news(news_list):
     print("AI 요약 시도 중...")
     
-    # 시도해볼 모델 후보들 (순서대로 시도)
-    candidates = ["gemini-1.5-flash", "gemini-pro", "gemini-1.0-pro"]
+    # 시도해볼 모델 후보들 (가장 최신 모델인 2.5 Flash를 1순위로 설정)
+    candidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-pro"]
     
     prompt = f"""
     뉴스 목록을 읽고 '보안 뉴스 브리핑'을 3줄로 요약해.
