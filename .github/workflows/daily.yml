@@ -27,7 +27,9 @@ jobs:
 
       - name: 필요 라이브러리 설치
         run: |
-          pip install requests tavily-python google-generativeai fpdf qrcode
+          # Pillow 추가됨 (이미지 처리용)
+          pip install requests tavily-python google-generativeai fpdf qrcode Pillow
+
 
       - name: 뉴스 브리핑 실행
         env:
