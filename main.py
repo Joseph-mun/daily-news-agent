@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-
 KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
 KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
 
@@ -39,8 +38,8 @@ def search_naver_news(query, category):
     
     params = {
         "query": query,
-        "display": 40, # 넉넉하게 가져옴
-        "sort": "date" # 최신순
+        "display": 40, 
+        "sort": "date" 
     }
     
     collected = []
@@ -49,19 +48,20 @@ def search_naver_news(query, category):
         if res.status_code == 200:
             items = res.json().get('items', [])
             for item in items:
-                # [1차 필터] 파이썬이 날짜를 확실히 거름
+                clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
+                
+                # 1. 날짜 필터링 (로그 추가)
                 try:
                     pub_date_str = item['pubDate']
                     pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
                     pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
                     
                     if pub_date_fmt < YESTERDAY:
+                        print(f"   🗑️ [날짜 미달] {pub_date_fmt} | {clean_title[:15]}...")
                         continue
                 except:
                     pub_date_fmt = TODAY_STR
 
-                # 텍스트 정제
-                clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
                 clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
 
                 collected.append({
@@ -72,7 +72,7 @@ def search_naver_news(query, category):
                     "content": clean_desc
                 })
             
-            print(f"   👉 {len(collected)}건 확보 (날짜 필터 통과)")
+            print(f"   👉 {len(collected)}건 확보 (1차 필터 통과)")
         else:
             print(f"❌ 네이버 API 에러: {res.status_code}")
             
@@ -82,23 +82,20 @@ def search_naver_news(query, category):
     return collected
 
 # ==========================================
-# 3. AI 필터링 (날짜 검증 완전 삭제 / 중요도 판단)
+# 3. AI 변환 (단순 포맷팅)
 # ==========================================
 def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # [핵심 변경] "날짜 확인하지 마라" + "중요한 뉴스만 남겨라"
     prompt = f"""
     [입력 데이터]
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 너는 '보안 뉴스 편집자'다. 입력된 기사들은 이미 날짜 검증이 끝났다. **날짜를 다시 확인하지 마라.**
-    2. 각 기사의 제목과 내용을 보고 **'보안 담당자가 꼭 봐야 할 중요한 뉴스'**인지 판단해라.
-    3. 중요도가 낮거나(단순 광고, 홍보), 내용이 중복되는 기사는 과감히 삭제해라.
-    4. [해외] 기사의 제목은 **한국어로 자연스럽게 번역**해라.
-    5. 'detected_date' 필드에는 입력된 'published_date' 값을 그대로 복사해 넣어라.
+    1. 입력된 모든 기사를 **하나도 빠짐없이** JSON 리스트로 변환해라. (삭제 금지)
+    2. [해외] 기사 제목은 **한국어로 번역**해라.
+    3. 'detected_date' 필드에는 입력된 'published_date' 값을 그대로 넣어라.
     
     [출력 포맷]
     JSON 리스트:
@@ -112,44 +109,88 @@ def call_gemini_batch(batch_items):
     try:
         res = requests.post(url, headers=headers, json=data)
         if res.status_code == 200:
-            text = res.json()['candidates'][0]['content']['parts'][0]['text']
-            clean_text = text.replace("```json", "").replace("```", "").strip()
-            match = re.search(r'\[.*\]', clean_text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-    except Exception:
-        pass
+            res_json = res.json()
+            if 'candidates' in res_json:
+                text = res_json['candidates'][0]['content']['parts'][0]['text']
+                clean_text = text.replace("```json", "").replace("```", "").strip()
+                
+                try:
+                    start = clean_text.find('[')
+                    end = clean_text.rfind(']') + 1
+                    if start != -1 and end != -1:
+                        json_str = clean_text[start:end]
+                        return json.loads(json_str)
+                    else:
+                        print(f"    ⚠️ [AI 에러] JSON 구조 못 찾음. 응답: {clean_text[:50]}...")
+                except json.JSONDecodeError:
+                    print(f"    ⚠️ [AI 에러] JSON 파싱 실패. 응답: {clean_text[:50]}...")
+            else:
+                print("    ⚠️ [AI 에러] 응답 내용 없음 (Blocked)")
+        else:
+            print(f"    ❌ [API 에러] 상태코드: {res.status_code}")
+    except Exception as e:
+        print(f"    ❌ [연결 에러] {e}")
+        
     return []
 
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 뉴스 선별 및 번역 중...")
+    print("\n🤖 [2단계] AI 번역 및 포맷팅 (삭제 사유 추적)...")
     
-    final_results = []
-    # 10개씩 묶어서 처리 (속도 향상)
-    BATCH_SIZE = 10
+    processed_results = []
+    BATCH_SIZE = 5
     
+    # 1. AI 처리 루프
     for i in range(0, len(news_list), BATCH_SIZE):
         batch = news_list[i : i + BATCH_SIZE]
         results = call_gemini_batch(batch)
+        
         if results:
+            # 요청 개수 vs 응답 개수 비교
+            if len(results) < len(batch):
+                print(f"   ⚠️ [AI 누락] 요청 {len(batch)}개 -> 응답 {len(results)}개 (AI가 일부를 임의 삭제함)")
+            
             for item in results:
-                # print(f"      ✅ 선별: {item['title'][:10]}...")
-                final_results.extend(results)
+                processed_results.append(item)
+        else:
+            print(f"   🗑️ [배치 실패] {i}~{i+BATCH_SIZE}번 구간 AI 변환 실패로 전체 삭제됨")
+            
         time.sleep(1)
 
-    # 중복 제거 (URL 기준)
-    unique_results = {v['url']: v for v in final_results}.values()
+    # 2. 중복 제거 및 최종 선별
+    final_kr = []
+    final_en = []
+    seen_urls = set()
     
-    # [최종 편집] 국내 5개, 해외 3개 자르기
-    # 네이버 API가 이미 최신순/관련도순으로 줬기 때문에, AI가 살려둔 것 중 상위 N개를 뽑으면 됨
-    all_sorted = list(unique_results)
+    print("\n📊 [3단계] 최종 선별 과정 로그:")
     
-    kr_list = [x for x in all_sorted if "[국내]" in x['category']][:5]
-    en_list = [x for x in all_sorted if "[해외]" in x['category']][:3]
-    
-    print(f"   📊 최종 선정: 국내 {len(kr_list)}개 / 해외 {len(en_list)}개")
-    return kr_list + en_list
+    # 날짜 최신순 정렬 (단순 문자열 비교)
+    processed_results.sort(key=lambda x: x.get('detected_date', ''), reverse=True)
+
+    for item in processed_results:
+        # 중복 체크
+        if item['url'] in seen_urls:
+            print(f"   🗑️ [중복 제거] {item['title'][:15]}...")
+            continue
+        seen_urls.add(item['url'])
+        
+        # 카테고리별 분류 및 개수 제한 체크
+        if "[국내]" in item['category']:
+            if len(final_kr) < 5:
+                final_kr.append(item)
+                # print(f"   ✅ [국내 선정] {item['title'][:15]}...")
+            else:
+                print(f"   ✂️ [순위 밖] 국내 5개 초과로 제외: {item['title'][:15]}...")
+                
+        elif "[해외]" in item['category']:
+            if len(final_en) < 3:
+                final_en.append(item)
+                # print(f"   ✅ [해외 선정] {item['title'][:15]}...")
+            else:
+                print(f"   ✂️ [순위 밖] 해외 3개 초과로 제외: {item['title'][:15]}...")
+
+    print(f"\n✅ 최종 확정: 국내 {len(final_kr)}개 / 해외 {len(final_en)}개")
+    return final_kr + final_en
 
 # ==========================================
 # 4. 카카오톡 전송
@@ -172,7 +213,7 @@ def send_kakaotalk(articles):
         print("⚠️ 전송할 기사가 없습니다.")
         return
 
-    print("\n🚀 [3단계] 카카오톡 전송 중...")
+    print("\n🚀 [4단계] 카카오톡 전송 중...")
     access_token = get_kakao_access_token()
     if not access_token: return
 
@@ -207,13 +248,8 @@ def send_kakaotalk(articles):
 # 5. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    # 1. 국내 뉴스
     kr_news = search_naver_news("정보보호 해킹 개인정보유출", "[국내]")
-    
-    # 2. 해외 뉴스 (1차: 사고)
     en_news_1 = search_naver_news("해외 해킹 사이버 공격", "[해외]")
-    
-    # 3. 해외 뉴스 (2차: 트렌드)
     en_news_2 = search_naver_news("글로벌 보안 트렌드 AI 보안 기술", "[해외]")
     
     all_news = kr_news + en_news_1 + en_news_2
@@ -223,6 +259,6 @@ if __name__ == "__main__":
         if final_list:
             send_kakaotalk(final_list)
         else:
-            print("⚠️ AI 필터링 결과 없음")
+            print("⚠️ 모든 기사가 탈락했습니다. (위 로그 확인)")
     else:
-        print("⚠️ 검색 결과 없음")
+        print("⚠️ 검색된 기사가 하나도 없습니다.")
