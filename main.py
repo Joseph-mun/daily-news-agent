@@ -126,7 +126,8 @@ def call_gemini_batch(batch_items):
     [지시사항]
     1. 각 기사의 'published_date'와 내용을 보고 **정확한 날짜**를 판단해라.
     2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간)** 기사만 남겨라.
-    3. 남은 기사의 제목은 한국어로 번역하고, 요약 없이 제목/URL만 남겨라.
+    3. 남은 기사의 제목은 한국어로 번역하고, 제목이랑 URL만 남겨라.
+    4. 자체적으로 내용을 요약해서 기사들을 비교해보고 비슷한 내용이면 하나의 기사만 남겨라.
     
     [출력 포맷]
     JSON 리스트:
@@ -169,7 +170,7 @@ def ai_filter_and_format(news_list):
     sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
     
     # 국내 7개, 해외 3개
-    kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
+    kr_list = [x for x in sorted_results if "[국내]" in x['category']][:5]
     en_list = [x for x in sorted_results if "[해외]" in x['category']][:3]
     
     return kr_list + en_list
