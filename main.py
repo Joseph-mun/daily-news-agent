@@ -9,6 +9,8 @@ from tavily import TavilyClient
 # ==========================================
 # 1. 환경변수 및 날짜 설정
 # ==========================================
+NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
+NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
@@ -21,82 +23,95 @@ YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
 print(f"📅 기준 날짜: {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
 
 # ==========================================
-# 2. 도메인 리스트
+# 2. 국내 뉴스 (네이버 API)
 # ==========================================
-DOMAINS_KR = [
-    "news.naver.com", "boannews.com", "dailysecu.com", "etnews.com", 
-    "zdnet.co.kr", "datanet.co.kr", "ddaily.co.kr", "digitaltoday.co.kr", 
-    "bloter.net", "itworld.co.kr", "byline.network", "ciokorea.com",
-    "yna.co.kr", "news1.kr", "newsis.com"
-]
-DOMAINS_EN = [
-    "thehackernews.com", "bleepingcomputer.com", "darkreading.com", 
-    "infosecurity-magazine.com", "scmagazine.com", "cyberscoop.com",
-    "securityweek.com", "wired.com", "techcrunch.com"
-]
+def search_naver_news():
+    print(f"\n🇰🇷 [국내] 네이버 뉴스 검색 시작...")
+    if not NAVER_ID or not NAVER_SECRET:
+        print("❌ 네이버 API 키가 없습니다.")
+        return []
 
-# ==========================================
-# 3. 뉴스 검색 (광범위 수집 -> 정밀 필터링 -> 상위 25개 추출)
-# ==========================================
-def search_news():
-    print(f"\n🔍 [1단계] Tavily 뉴스 검색 시작...")
-    tavily = TavilyClient(api_key=TAVILY_KEY)
+    query = "정보보호 해킹 개인정보유출 보안 침해사고"
+    url = "https://openapi.naver.com/v1/search/news.json"
+    headers = {"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET}
+    params = {"query": query, "display": 30, "sort": "date"}
+    
     collected = []
+    try:
+        res = requests.get(url, headers=headers, params=params)
+        if res.status_code == 200:
+            items = res.json().get('items', [])
+            for item in items:
+                try:
+                    pub_date_str = item['pubDate']
+                    pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
+                    pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
+                    if pub_date_fmt < YESTERDAY: continue
+                except:
+                    pub_date_fmt = "날짜파싱불가"
 
-    targets = [
-        ("정보보호 해킹 개인정보유출", DOMAINS_KR, "[국내]"),
-        ("Cyber Security Hacking Data Breach", DOMAINS_EN, "[해외]")
-    ]
-
-    for query, domains, category in targets:
-        try:
-            # [전략 변경] 일단 넉넉하게 40개씩 요청 (쓰레기 데이터 걸러낼 여유 확보)
-            res = tavily.search(
-                query=query, 
-                topic="news", 
-                days=2, 
-                search_depth="advanced",
-                include_domains=domains, 
-                max_results=40 
-            )
-            
-            temp_list = []
-            
-            for item in res.get('results', []):
-                pub_date = item.get('published_date', '')
-                if pub_date is None: pub_date = ""
-                
-                # [강력 필터] 날짜 정보가 있고, '2026'이나 'ago'(시간 전)가 없으면 과감히 버림
-                # 예: '2021-05...', '2024-12...' -> 탈락
-                # 예: '2026-01...', '2 hours ago' -> 통과
-                if pub_date and ('2026' not in pub_date and 'ago' not in pub_date):
-                     continue
-
-                title = item.get('title', '')
-                content = item.get('content', '')
-                
-                temp_list.append({
-                    "category": category,
-                    "title": title,
-                    "url": item['url'],
-                    "published_date": pub_date,
-                    "content": content
+                clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
+                collected.append({
+                    "category": "[국내]",
+                    "title": clean_title,
+                    "url": item['originallink'] or item['link'],
+                    "published_date": pub_date_fmt,
+                    "content": re.sub('<.+?>', '', item['description'])
                 })
-            
-            # [최종 커팅] 필터를 통과한 '알짜배기' 중에서 앞에서부터 25개만 선정
-            selected_items = temp_list[:25]
-            collected.extend(selected_items)
-            
-            print(f"   👉 {category}: 40개 검색 -> 필터링 후 {len(selected_items)}개 선정")
-
-        except Exception as e:
-            print(f"❌ 검색 오류 ({category}): {e}")
-
-    print(f"👉 총 수집된 기사: {len(collected)}건 (AI 정밀 검수 진행)")
+            print(f"   👉 네이버 최신 뉴스: {len(collected)}건 확보")
+    except Exception as e:
+        print(f"❌ 네이버 요청 실패: {e}")
     return collected
 
 # ==========================================
-# 4. AI 필터링 (배치 처리 + 본문 전체 분석)
+# 3. 해외 뉴스 (Tavily - 필터 제거 / 수집량 확대)
+# ==========================================
+def search_tavily_news():
+    print(f"\n🇺🇸 [해외] Tavily 뉴스 검색 시작...")
+    tavily = TavilyClient(api_key=TAVILY_KEY)
+    collected = []
+    
+    domains_en = [
+        "thehackernews.com", "bleepingcomputer.com", "darkreading.com", 
+        "infosecurity-magazine.com", "scmagazine.com", "cyberscoop.com",
+        "securityweek.com", "wired.com", "techcrunch.com"
+    ]
+    
+    try:
+        # 20개를 요청해서 Tavily가 주는 대로 다 받아옵니다. (날짜 필터 제거됨)
+        res = tavily.search(
+            query="Cyber Security Hacking Data Breach", 
+            topic="news", 
+            days=2, 
+            search_depth="advanced",
+            include_domains=domains_en, 
+            max_results=20
+        )
+        
+        temp_list = []
+        for item in res.get('results', []):
+            # [수정됨] 강제 날짜 검문소 삭제!
+            # Tavily가 '최신'이라고 판단해서 준 거면 일단 믿고 가져옵니다.
+            
+            temp_list.append({
+                "category": "[해외]",
+                "title": item['title'],
+                "url": item['url'],
+                "published_date": item.get('published_date', ''),
+                "content": item.get('content', '')
+            })
+        
+        # 앞에서부터 25개만 끊어서 가져갑니다.
+        collected = temp_list[:20]
+        print(f"   👉 Tavily 해외 뉴스: {len(temp_list)}개 중 {len(collected)}건 전달")
+        
+    except Exception as e:
+        print(f"❌ Tavily 검색 오류: {e}")
+
+    return collected
+
+# ==========================================
+# 4. AI 필터링 (배치 처리)
 # ==========================================
 def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
@@ -109,7 +124,7 @@ def call_gemini_batch(batch_items):
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 각 기사의 'published_date'와 'content'를 분석해 정확한 발행일을 찾아라.
+    1. 각 기사의 'published_date'와 내용을 보고 **정확한 날짜**를 판단해라.
     2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간)** 기사만 남겨라.
     3. 남은 기사의 제목은 한국어로 번역하고, 요약 없이 제목/URL만 남겨라.
     
@@ -130,34 +145,30 @@ def call_gemini_batch(batch_items):
             match = re.search(r'\[.*\]', clean_text, re.DOTALL)
             if match:
                 return json.loads(match.group())
-    except Exception as e:
-        print(f"    ⚠️ 배치 처리 중 에러: {e}")
-    
+    except Exception:
+        pass
     return []
 
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 (배치 처리 시작)...")
+    print("\n🤖 [3단계] AI 정밀 검수 (배치 처리)...")
     
     final_results = []
-    # 5개씩 끊어서 처리
     BATCH_SIZE = 5 
     
     for i in range(0, len(news_list), BATCH_SIZE):
         batch = news_list[i : i + BATCH_SIZE]
-        print(f"   📡 {i+1}~{i+len(batch)}번째 기사 분석 중...")
-        
         results = call_gemini_batch(batch)
         if results:
             for item in results:
                 print(f"      ✅ 확보: {item.get('detected_date')} | {item['title'][:20]}...")
                 final_results.extend(results)
-        
-        time.sleep(2)
+        time.sleep(1)
 
     unique_results = {v['url']: v for v in final_results}.values()
     sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
     
+    # 국내 7개, 해외 3개
     kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
     en_list = [x for x in sorted_results if "[해외]" in x['category']][:3]
     
@@ -184,7 +195,7 @@ def send_kakaotalk(articles):
         print("⚠️ 전송할 유효 기사가 없습니다.")
         return
 
-    print("\n🚀 [3단계] 카카오톡 전송 중...")
+    print("\n🚀 [4단계] 카카오톡 전송 중...")
     access_token = get_kakao_access_token()
     if not access_token: return
 
@@ -202,8 +213,8 @@ def send_kakaotalk(articles):
             "object_type": "text",
             "text": message_text,
             "link": {
-                "web_url": "https://m.naver.com",
-                "mobile_web_url": "https://m.naver.com"
+                "web_url": "https://www.google.com/search?q=정보보호+해킹+뉴스&tbm=nws",
+                "mobile_web_url": "https://www.google.com/search?q=정보보호+해킹+뉴스&tbm=nws"
             },
             "button_title": "뉴스 더보기"
         })
@@ -219,9 +230,13 @@ def send_kakaotalk(articles):
 # 6. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    news = search_news()
-    if news:
-        final_list = ai_filter_and_format(news)
+    kr_news = search_naver_news()
+    en_news = search_tavily_news()
+    
+    all_news = kr_news + en_news
+    
+    if all_news:
+        final_list = ai_filter_and_format(all_news)
         if final_list:
             send_kakaotalk(final_list)
         else:
