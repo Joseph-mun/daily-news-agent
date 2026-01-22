@@ -36,7 +36,7 @@ DOMAINS_EN = [
 ]
 
 # ==========================================
-# 3. 뉴스 검색 (날짜 데이터 확보 및 1차 필터)
+# 3. 뉴스 검색 (본문 전체 수집)
 # ==========================================
 def search_news():
     print(f"\n🔍 [1단계] Tavily 뉴스 검색 시작...")
@@ -51,7 +51,7 @@ def search_news():
 
     for query, domains, category in targets:
         try:
-            # days=3 옵션 추가: 최근 3일치만 1차로 가져오기
+            # days=3 옵션: 최근 3일치만 1차로 가져오기
             res = tavily.search(
                 query=query, 
                 topic="news", 
@@ -62,9 +62,11 @@ def search_news():
             )
             
             for item in res.get('results', []):
-                # AI에게 판단을 맡기기 위해 'published_date'와 'content'를 함께 수집
+                # AI에게 날짜 판단을 맡기기 위해 메타데이터와 본문 수집
                 pub_date = item.get('published_date', '날짜없음')
-                content = item.get('content', '')[:300] # 본문 앞 300자만
+                
+                # [수정됨] 300자 제한 제거! 본문 전체(또는 Tavily가 제공하는 최대치)를 가져옴
+                content = item.get('content', '') 
                 
                 collected.append({
                     "category": category,
@@ -76,7 +78,7 @@ def search_news():
         except Exception as e:
             print(f"❌ 검색 오류 ({category}): {e}")
 
-    print(f"👉 1차 수집된 기사: {len(collected)}건 (AI에게 날짜 검증 요청)")
+    print(f"👉 1차 수집된 기사: {len(collected)}건 (AI에게 정밀 날짜 검증 요청)")
     return collected
 
 # ==========================================
@@ -84,12 +86,11 @@ def search_news():
 # ==========================================
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 (날짜 확인 중)...")
+    print("\n🤖 [2단계] AI 정밀 검수 (본문 전체 분석 중)...")
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # [수정] 사용자 요청 사항 반영된 강력한 프롬프트
     prompt = f"""
     너는 깐깐한 보안 뉴스 편집장이다. 
     오늘 날짜: {TODAY_STR}
@@ -99,11 +100,11 @@ def ai_filter_and_format(news_list):
     {json.dumps(news_list)}
 
     [작업 지시]
-    1. 각 기사의 'published_date'와 'content'를 분석하여 **기사가 발행된 정확한 날짜**를 찾아라.
+    1. 각 기사의 'published_date'와 **'content'(본문 전체)**를 분석하여 **기사가 발행된 정확한 날짜**를 찾아라.
     2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간 이내)**에 발행된 기사만 남겨라. 
-       (2021년, 2025년 등 과거 기사는 무조건 삭제해라.)
     3. 남은 기사 중 [국내] 상위 7개, [해외] 상위 3개를 중요도 순으로 선별해라.
     4. 해외 기사 제목은 **자연스러운 한국어**로 번역해라.
+    5. **요약은 하지 마라.** 오직 제목과 URL만 필요하다.
     
     [출력 포맷 - 중요]
     검증을 위해 **'detected_date'(AI가 찾은 날짜)** 필드를 반드시 포함해라.
@@ -123,7 +124,12 @@ def ai_filter_and_format(news_list):
     try:
         res = requests.post(url, headers=headers, json=data)
         if res.status_code == 200:
-            text = res.json()['candidates'][0]['content']['parts'][0]['text']
+            res_json = res.json()
+            if 'candidates' not in res_json:
+                print("❌ AI 응답 없음 (Candidates Empty)")
+                return []
+
+            text = res_json['candidates'][0]['content']['parts'][0]['text']
             clean_text = text.replace("```json", "").replace("```", "").strip()
             
             match = re.search(r'\[.*\]', clean_text, re.DOTALL)
@@ -140,13 +146,14 @@ def ai_filter_and_format(news_list):
                 print("⚠️ JSON 파싱 실패")
         else:
             print(f"❌ API 오류: {res.status_code}")
+            print(res.text)
     except Exception as e:
         print(f"❌ AI 연결 오류: {e}")
     
     return []
 
 # ==========================================
-# 5. 카카오톡 전송 (넘버링 추가)
+# 5. 카카오톡 전송
 # ==========================================
 def get_kakao_access_token():
     url = "https://kauth.kakao.com/oauth/token"
@@ -170,7 +177,7 @@ def send_kakaotalk(articles):
     access_token = get_kakao_access_token()
     if not access_token: return
 
-    # [수정] 넘버링 추가 로직
+    # 넘버링 추가 로직
     message_text = f"🛡️ {TODAY_STR} 주요 보안 뉴스\n\n"
     
     for i, item in enumerate(articles, 1):
