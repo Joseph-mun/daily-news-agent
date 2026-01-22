@@ -20,7 +20,7 @@ jobs:
       - name: 저장소 체크아웃
         uses: actions/checkout@v3
 
-      - name: 파이썬 설정 (3.9 버전)
+      - name: 파이썬 설정 (3.11 버전)
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -31,6 +31,7 @@ jobs:
 
       - name: 뉴스 브리핑 실행
         env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # [네이버]
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
