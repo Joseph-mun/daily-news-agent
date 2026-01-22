@@ -8,12 +8,10 @@ from datetime import datetime, timedelta
 # ==========================================
 # 1. 환경변수 설정
 # ==========================================
-# [네이버 키]
 NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# [카카오 키]
 KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
 KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
 
@@ -39,8 +37,8 @@ def search_naver_news(query, category):
         "X-Naver-Client-Secret": NAVER_SECRET
     }
     
-    # 해외는 검색 풀을 넓히기 위해 40개, 국내는 30개 요청
-    display_count = 40 if category == "[해외]" else 30
+    # 검색 결과 개수 설정
+    display_count = 50 
     
     params = {
         "query": query,
@@ -57,7 +55,6 @@ def search_naver_news(query, category):
                 # 1. 날짜 필터링
                 try:
                     pub_date_str = item['pubDate']
-                    # 네이버 포맷: "Thu, 23 Jan 2026 10:00:00 +0900"
                     pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
                     pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
                     
@@ -65,9 +62,9 @@ def search_naver_news(query, category):
                     if pub_date_fmt < YESTERDAY:
                         continue
                 except:
-                    pub_date_fmt = "날짜파싱불가"
+                    pub_date_fmt = TODAY_STR # 날짜 파싱 실패 시 오늘로 간주하고 AI에게 넘김
 
-                # 2. 텍스트 정제 (HTML 태그 제거)
+                # 2. 텍스트 정제
                 clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
                 clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
 
@@ -96,15 +93,16 @@ def call_gemini_batch(batch_items):
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
-    오늘: {TODAY_STR} / 어제: {YESTERDAY}
+    오늘 날짜: {TODAY_STR}
     
     [입력 데이터]
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 각 기사의 날짜와 내용을 보고 **최근 24시간({YESTERDAY} ~ {TODAY_STR})** 기사인지 재확인해라.
-    2. [해외] 기사는 제목을 **자연스러운 한국어**로 번역해라.
-    3. 중복된 내용이 있다면 하나만 남겨라.
+    1. 각 기사의 내용을 보고 보안/해킹/개인정보와 관련된 중요 뉴스인지 판단해라.
+    2. 날짜가 **{YESTERDAY} 또는 {TODAY_STR}**인 최신 기사만 남겨라.
+    3. [해외] 카테고리 기사는 제목을 **자연스러운 한국어**로 번역해라.
+    4. 중복된 기사는 하나만 남겨라.
     
     [출력 포맷]
     JSON 리스트:
@@ -208,11 +206,13 @@ def send_kakaotalk(articles):
 # 5. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    # 국내 뉴스 검색
+    # [수정됨] 국내 뉴스 검색
     kr_news = search_naver_news("정보보호 해킹 개인정보유출 보안 침해사고", "[국내]")
     
-    # 해외 뉴스 검색 (영어로 검색해서 네이버가 찾은 해외 관련 기사 수집)
-    en_news = search_naver_news("Cyber Security Data Breach", "[해외]")
+    # [수정됨] 해외 뉴스 검색 (영어 대신 '한국어'로 검색해야 네이버에서 나옵니다!)
+    # "해외 해킹", "글로벌 보안", "국제 해킹 사고", "미국 개인정보 유출" 등을 검색하면
+    # 국내 언론사가 다룬 최신 해외 보안 뉴스들이 검색됩니다.
+    en_news = search_naver_news("해외 해킹 글로벌 보안 국제 해킹 사고", "[해외]")
     
     all_news = kr_news + en_news
     
