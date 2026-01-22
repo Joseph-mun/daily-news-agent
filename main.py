@@ -37,11 +37,10 @@ def search_naver_news(query, category):
         "X-Naver-Client-Secret": NAVER_SECRET
     }
     
-    # 넉넉하게 가져옴
     params = {
         "query": query,
-        "display": 40,
-        "sort": "date" 
+        "display": 40, # 넉넉하게 가져옴
+        "sort": "date" # 최신순
     }
     
     collected = []
@@ -50,7 +49,7 @@ def search_naver_news(query, category):
         if res.status_code == 200:
             items = res.json().get('items', [])
             for item in items:
-                # 1. 날짜 필터링 (파이썬이 수행)
+                # [1차 필터] 파이썬이 날짜를 확실히 거름
                 try:
                     pub_date_str = item['pubDate']
                     pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
@@ -59,10 +58,9 @@ def search_naver_news(query, category):
                     if pub_date_fmt < YESTERDAY:
                         continue
                 except:
-                    # 날짜 파싱 실패 시, 안전하게 오늘로 처리하고 AI에게 넘김
                     pub_date_fmt = TODAY_STR
 
-                # 2. 텍스트 정제
+                # 텍스트 정제
                 clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
                 clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
 
@@ -70,11 +68,11 @@ def search_naver_news(query, category):
                     "category": category,
                     "title": clean_title,
                     "url": item['originallink'] or item['link'],
-                    "published_date": pub_date_fmt, # 이 날짜를 AI가 그대로 쓰게 할 것임
+                    "published_date": pub_date_fmt,
                     "content": clean_desc
                 })
             
-            print(f"   👉 {len(collected)}건 확보")
+            print(f"   👉 {len(collected)}건 확보 (날짜 필터 통과)")
         else:
             print(f"❌ 네이버 API 에러: {res.status_code}")
             
@@ -84,24 +82,23 @@ def search_naver_news(query, category):
     return collected
 
 # ==========================================
-# 3. AI 필터링 (날짜 검증 패스)
+# 3. AI 필터링 (날짜 검증 완전 삭제 / 중요도 판단)
 # ==========================================
 def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # [핵심] 입력된 published_date를 그대로 뱉으라고 지시 (날짜 검증 금지)
+    # [핵심 변경] "날짜 확인하지 마라" + "중요한 뉴스만 남겨라"
     prompt = f"""
-    오늘 날짜: {TODAY_STR}
-    
     [입력 데이터]
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 너는 관대한 '보안 뉴스 큐레이터'다.
-    2. 입력 데이터에 있는 **'published_date' 필드 값을 그대로 출력의 'detected_date'에 복사해라.** (절대 본문에서 날짜를 다시 찾으려 하지 마라. 실패 원인이다.)
-    3. 기사의 주제가 **보안, 해킹, IT, AI, 정책**과 조금이라도 관련이 있으면 **무조건 포함시켜라.**
-    4. [해외] 기사는 제목을 한국어로 번역해라.
+    1. 너는 '보안 뉴스 편집자'다. 입력된 기사들은 이미 날짜 검증이 끝났다. **날짜를 다시 확인하지 마라.**
+    2. 각 기사의 제목과 내용을 보고 **'보안 담당자가 꼭 봐야 할 중요한 뉴스'**인지 판단해라.
+    3. 중요도가 낮거나(단순 광고, 홍보), 내용이 중복되는 기사는 과감히 삭제해라.
+    4. [해외] 기사의 제목은 **한국어로 자연스럽게 번역**해라.
+    5. 'detected_date' 필드에는 입력된 'published_date' 값을 그대로 복사해 넣어라.
     
     [출력 포맷]
     JSON 리스트:
@@ -126,28 +123,32 @@ def call_gemini_batch(batch_items):
 
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 중 (날짜 검증 생략)...")
+    print("\n🤖 [2단계] AI 뉴스 선별 및 번역 중...")
     
     final_results = []
-    BATCH_SIZE = 5 
+    # 10개씩 묶어서 처리 (속도 향상)
+    BATCH_SIZE = 10
     
     for i in range(0, len(news_list), BATCH_SIZE):
         batch = news_list[i : i + BATCH_SIZE]
         results = call_gemini_batch(batch)
         if results:
             for item in results:
-                print(f"      ✅ 통과: {item['title'][:15]}...")
+                # print(f"      ✅ 선별: {item['title'][:10]}...")
                 final_results.extend(results)
         time.sleep(1)
 
+    # 중복 제거 (URL 기준)
     unique_results = {v['url']: v for v in final_results}.values()
-    # 날짜 역순 정렬
-    sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
     
-    # 국내 7개, 해외 5개
-    kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
-    en_list = [x for x in sorted_results if "[해외]" in x['category']][:5]
+    # [최종 편집] 국내 5개, 해외 3개 자르기
+    # 네이버 API가 이미 최신순/관련도순으로 줬기 때문에, AI가 살려둔 것 중 상위 N개를 뽑으면 됨
+    all_sorted = list(unique_results)
     
+    kr_list = [x for x in all_sorted if "[국내]" in x['category']][:5]
+    en_list = [x for x in all_sorted if "[해외]" in x['category']][:3]
+    
+    print(f"   📊 최종 선정: 국내 {len(kr_list)}개 / 해외 {len(en_list)}개")
     return kr_list + en_list
 
 # ==========================================
@@ -189,8 +190,8 @@ def send_kakaotalk(articles):
             "object_type": "text",
             "text": message_text,
             "link": {
-                "web_url": "https://www.google.com/search?q=보안+동향+뉴스&tbm=nws",
-                "mobile_web_url": "https://www.google.com/search?q=보안+동향+뉴스&tbm=nws"
+                "web_url": "https://www.google.com/search?q=보안+뉴스&tbm=nws",
+                "mobile_web_url": "https://www.google.com/search?q=보안+뉴스&tbm=nws"
             },
             "button_title": "뉴스 더보기"
         })
@@ -206,16 +207,15 @@ def send_kakaotalk(articles):
 # 5. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    # 1. 국내 뉴스 (사고 위주)
+    # 1. 국내 뉴스
     kr_news = search_naver_news("정보보호 해킹 개인정보유출", "[국내]")
     
-    # 2. 해외 뉴스 (1차: 사고) -> 검색어 분리 전략
-    en_news_1 = search_naver_news("해외 해킹 사이버 공격 랜섬웨어", "[해외]")
+    # 2. 해외 뉴스 (1차: 사고)
+    en_news_1 = search_naver_news("해외 해킹 사이버 공격", "[해외]")
     
-    # 3. 해외 뉴스 (2차: 트렌드/기술)
-    en_news_2 = search_naver_news("글로벌 보안 트렌드 AI 보안 제로트러스트 미국 보안", "[해외]")
+    # 3. 해외 뉴스 (2차: 트렌드)
+    en_news_2 = search_naver_news("글로벌 보안 트렌드 AI 보안 기술", "[해외]")
     
-    # 리스트 합치기
     all_news = kr_news + en_news_1 + en_news_2
     
     if all_news:
