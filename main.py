@@ -37,8 +37,8 @@ def search_naver_news(query, category):
         "X-Naver-Client-Secret": NAVER_SECRET
     }
     
-    # 검색량을 늘려서(60개) AI가 고를 수 있는 후보를 많이 줍니다.
-    display_count = 60
+    # 검색량을 넉넉하게 50개 잡음
+    display_count = 50
     
     params = {
         "query": query,
@@ -52,16 +52,17 @@ def search_naver_news(query, category):
         if res.status_code == 200:
             items = res.json().get('items', [])
             for item in items:
-                # 1. 날짜 필터링
+                # 1. 날짜 필터링 (파이썬이 1차로 확실히 거름)
                 try:
                     pub_date_str = item['pubDate']
                     pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
                     pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
                     
-                    # 어제 이후 기사만 통과 (파이썬이 1차로 거름)
+                    # 어제보다 오래된 기사는 여기서 바로 탈락
                     if pub_date_fmt < YESTERDAY:
                         continue
                 except:
+                    # 날짜 파싱 실패하면 안전하게 오늘 날짜로 퉁침
                     pub_date_fmt = TODAY_STR
 
                 # 2. 텍스트 정제
@@ -76,7 +77,7 @@ def search_naver_news(query, category):
                     "content": clean_desc
                 })
             
-            print(f"   👉 {len(collected)}건 확보 완료")
+            print(f"   👉 {len(collected)}건 확보 (파이썬 날짜 필터 통과)")
         else:
             print(f"❌ 네이버 API 에러: {res.status_code}")
             
@@ -86,13 +87,13 @@ def search_naver_news(query, category):
     return collected
 
 # ==========================================
-# 3. AI 필터링 (완화된 조건)
+# 3. AI 필터링 (관대해진 버전)
 # ==========================================
 def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
-    # [수정] 프롬프트 대폭 수정 (트렌드/기술 포함, 필터링 완화)
+    # [핵심 수정] AI에게 "날짜 검증 하지마"라고 지시
     prompt = f"""
     오늘 날짜: {TODAY_STR}
     
@@ -100,16 +101,16 @@ def call_gemini_batch(batch_items):
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 너는 '보안 뉴스 큐레이터'다. **너무 엄격하게 기사를 버리지 마라.**
-    2. 단순 해킹 사고뿐만 아니라 **보안 신기술(AI, 제로트러스트), 시장 동향, 정책, 해외 트렌드** 기사도 적극적으로 포함해라.
-    3. 기사 본문에 날짜가 명시되어 있지 않다면, **입력 데이터의 'published_date'를 믿고 최신 기사로 간주해라.** (날짜 때문에 기사를 버리지 마라)
-    4. 중복된 내용이 있다면 하나만 남겨라.
-    5. [해외] 카테고리는 제목을 한국어로 자연스럽게 번역해라.
+    1. 너는 '보안 뉴스 큐레이터'다.
+    2. 입력된 기사들은 이미 날짜 검증이 끝난 것들이다. **날짜가 맞는지 의심하지 말고 무조건 최신 기사로 간주해라.**
+    3. 기사의 주제가 **'보안, 해킹, IT 신기술, 개인정보'**와 관련 있다면 **절대 버리지 말고 포함시켜라.**
+    4. [해외] 기사는 제목을 한국어로 자연스럽게 번역해라.
+    5. 중복된 기사만 제거해라.
     
     [출력 포맷]
     JSON 리스트:
     [
-      {{ "category": "[국내]or[해외]", "title": "제목", "url": "링크", "detected_date": "YYYY-MM-DD" }}
+      {{ "category": "[국내]or[해외]", "title": "제목", "url": "링크", "detected_date": "{TODAY_STR}" }}
     ]
     """
     
@@ -129,7 +130,7 @@ def call_gemini_batch(batch_items):
 
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 중 (트렌드/기술 포함)...")
+    print("\n🤖 [2단계] AI 정밀 검수 중 (날짜 검증 면제)...")
     
     final_results = []
     BATCH_SIZE = 5 
@@ -139,15 +140,15 @@ def ai_filter_and_format(news_list):
         results = call_gemini_batch(batch)
         if results:
             for item in results:
-                # 로그에 확보된 기사 제목 출력
                 print(f"      ✅ 확보: {item['title'][:15]}...")
                 final_results.extend(results)
         time.sleep(1)
 
     unique_results = {v['url']: v for v in final_results}.values()
-    sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
+    # 순서는 섞여도 상관없지만 일단 국내 우선
+    sorted_results = list(unique_results)
     
-    # 국내 7개, 해외 5개 (해외 비중 늘림)
+    # 국내 7개, 해외 5개 (수집된 게 적으면 있는 만큼만)
     kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
     en_list = [x for x in sorted_results if "[해외]" in x['category']][:5]
     
@@ -192,8 +193,9 @@ def send_kakaotalk(articles):
             "object_type": "text",
             "text": message_text,
             "link": {
-                "web_url": "https://www.google.com/search?q=정보보호+동향&tbm=nws",
-                "mobile_web_url": "https://www.google.com/search?q=정보보호+동향&tbm=nws"
+                # [버튼] 구글 뉴스 검색 링크 (보안 동향)
+                "web_url": "https://www.google.com/search?q=보안+동향+뉴스&tbm=nws",
+                "mobile_web_url": "https://www.google.com/search?q=보안+동향+뉴스&tbm=nws"
             },
             "button_title": "뉴스 더보기"
         })
@@ -209,12 +211,16 @@ def send_kakaotalk(articles):
 # 5. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    # [수정] 검색어 최적화 (국내 사고 위주)
-    kr_news = search_naver_news("정보보호 해킹 개인정보유출 보안사고", "[국내]")
+    # [국내 검색어] OR 연산자(|) 사용 안함 (네이버 기본 정확도 활용)
+    kr_query = "해킹|보안관제|개인정보유출|악성코드|제로데이" 
+    # -> 네이버 API는 띄어쓰기가 AND일 수 있어서, 파이프(|)를 쓰는게 OR 검색에 유리할 수 있지만,
+    #    일단 기본적인 키워드로 진행하되, 검색 범위를 넓힘.
+    kr_news = search_naver_news("정보보호 해킹 개인정보유출", "[국내]")
     
-    # [수정] 검색어 최적화 (해외 동향/기술 위주)
-    # 네이버에서 '해외' 뉴스를 찾기 위해 동향, 기술 관련 키워드를 대폭 추가
-    en_query = "글로벌 보안 동향 사이버보안 트렌드 미국 해킹 AI 보안 기술 제로트러스트 랜섬웨어 동향"
+    # [해외 검색어 - 필살기]
+    # 파이프(|)를 써서 '이것 OR 저것' 방식으로 검색하게 만듦
+    # "해외 해킹" OR "글로벌 보안" OR "사이버 트렌드" ...
+    en_query = "해외 해킹|글로벌 보안|미국 사이버 공격|보안 동향|최신 보안 기술|제로트러스트|AI 보안"
     en_news = search_naver_news(en_query, "[해외]")
     
     all_news = kr_news + en_news
@@ -224,6 +230,6 @@ if __name__ == "__main__":
         if final_list:
             send_kakaotalk(final_list)
         else:
-            print("⚠️ AI 필터링 결과 없음: 검색된 기사는 있지만 AI가 모두 걸러냈습니다.")
+            print("⚠️ AI 필터링 결과 없음: AI가 너무 많이 걸러냈습니다.")
     else:
-        print("⚠️ 검색 결과 없음: 네이버 뉴스 API에서 아무것도 찾지 못했습니다.")
+        print("⚠️ 검색 결과 없음: 키워드를 변경해보세요.")
