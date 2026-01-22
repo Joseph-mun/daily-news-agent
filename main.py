@@ -23,12 +23,12 @@ YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
 print(f"📅 기준 날짜: {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
 
 # ==========================================
-# 2. 국내 뉴스 검색 (네이버 API)
+# 2. 국내 뉴스 검색 (네이버 API - 루프 검색 방식)
 # ==========================================
 def search_naver_news():
-    # [수정] 신한 관련 키워드 제거 -> 순수 보안 키워드로 넓게 검색
-    query = "정보보호|해킹|개인정보유출|금융보안|랜섬웨어|DDoS"
-    print(f"\n🇰🇷 [국내] 네이버 검색 시작: {query}")
+    # [수정] 단일 쿼리 대신 리스트로 분리하여 각각 검색 후 병합
+    keywords = ["정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어"]
+    print(f"\n🇰🇷 [국내] 네이버 분할 검색 시작: {keywords}")
     
     if not NAVER_ID or not NAVER_SECRET:
         print("❌ 네이버 API 키가 없습니다.")
@@ -37,41 +37,54 @@ def search_naver_news():
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET}
     
-    # AI에게 보낼 후보군 넉넉히 확보
-    params = {"query": query, "display": 40, "sort": "date"}
-    
-    collected = []
-    try:
-        res = requests.get(url, headers=headers, params=params)
-        if res.status_code == 200:
-            items = res.json().get('items', [])
-            for item in items:
-                # 파이썬 1차 날짜 필터
-                try:
-                    pub_date_str = item['pubDate']
-                    pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
-                    pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
-                    if pub_date_fmt < YESTERDAY: continue
-                except:
-                    pub_date_fmt = TODAY_STR
+    all_collected = {} # URL을 키로 사용하여 중복 제거
 
-                clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
-                clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
+    for keyword in keywords:
+        try:
+            # 키워드당 15개씩만 가져와서 합침
+            params = {"query": keyword, "display": 15, "sort": "date"}
+            res = requests.get(url, headers=headers, params=params)
+            
+            if res.status_code == 200:
+                items = res.json().get('items', [])
+                count = 0
+                for item in items:
+                    # 파이썬 날짜 필터
+                    try:
+                        pub_date_str = item['pubDate']
+                        pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
+                        pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
+                        if pub_date_fmt < YESTERDAY: continue
+                    except:
+                        pub_date_fmt = TODAY_STR
 
-                collected.append({
-                    "category": "[국내]",
-                    "title": clean_title,
-                    "url": item['originallink'] or item['link'],
-                    "published_date": pub_date_fmt,
-                    "description": clean_desc
-                })
-            print(f"   👉 국내 후보 {len(collected)}개 확보")
-        else:
-            print(f"❌ 네이버 API 에러: {res.status_code}")
-    except Exception as e:
-        print(f"❌ 네이버 요청 실패: {e}")
-        
-    return collected
+                    link = item['originallink'] or item['link']
+                    
+                    # 이미 수집된 기사면 패스 (중복 제거)
+                    if link in all_collected:
+                        continue
+
+                    clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
+                    clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
+
+                    all_collected[link] = {
+                        "category": "[국내]",
+                        "title": clean_title,
+                        "url": link,
+                        "published_date": pub_date_fmt,
+                        "description": clean_desc
+                    }
+                    count += 1
+                # print(f"   - '{keyword}': {count}건 추가")
+            else:
+                print(f"   ❌ '{keyword}' 검색 실패: {res.status_code}")
+                
+        except Exception as e:
+            print(f"   ❌ 요청 오류: {e}")
+            
+    final_list = list(all_collected.values())
+    print(f"   👉 국내 후보 총 {len(final_list)}건 확보 (중복 제거 완료)")
+    return final_list
 
 # ==========================================
 # 3. 해외 뉴스 검색 (Tavily + 강력 날짜 필터)
@@ -83,7 +96,6 @@ def search_tavily_news():
         return []
         
     tavily = TavilyClient(api_key=TAVILY_KEY)
-    collected = []
     
     domains = [
         "thehackernews.com", "bleepingcomputer.com", "darkreading.com", 
@@ -101,7 +113,7 @@ def search_tavily_news():
         )
         
         # 2. 파이썬 강력 필터
-        temp_list = []
+        collected = []
         for item in res.get('results', []):
             pub_date = item.get('published_date', '')
             if pub_date is None: pub_date = ""
@@ -110,7 +122,7 @@ def search_tavily_news():
             if pub_date and ('2026' not in pub_date and 'ago' not in pub_date):
                  continue
 
-            temp_list.append({
+            collected.append({
                 "category": "[해외]",
                 "title": item['title'],
                 "url": item['url'],
@@ -119,16 +131,16 @@ def search_tavily_news():
             })
         
         # 3. 상위 20개만 AI 후보군으로 선정
-        collected = temp_list[:20]
+        collected = collected[:20]
         print(f"   👉 해외 후보 {len(collected)}개 확보 (필터링 완료)")
+        return collected
         
     except Exception as e:
         print(f"❌ Tavily 오류: {e}")
-
-    return collected
+        return []
 
 # ==========================================
-# 4. AI 선별 (우선순위 로직 수정)
+# 4. AI 선별 (우선순위 로직)
 # ==========================================
 def call_gemini_priority_selection(items, mode):
     if not items: return []
@@ -138,7 +150,7 @@ def call_gemini_priority_selection(items, mode):
     
     if mode == 'KR':
         target_count = 7
-        # [수정] 국내 뉴스 우선순위 가이드라인
+        # 국내 뉴스 우선순위 가이드라인
         system_instruction = """
         너는 '금융권 보안 뉴스 큐레이터'다. 
         입력된 뉴스 목록 중에서 다음 **우선순위(Priority)**에 따라 **상위 7개** 기사를 엄선해라.
@@ -149,7 +161,7 @@ def call_gemini_priority_selection(items, mode):
         3. **3순위 (참고):** '신한금융', '신한은행' 등 신한 계열사의 보안/디지털 관련 소식.
         
         [주의사항]
-        - **3순위(신한) 기사가 없으면 억지로 넣지 마라.** 그냥 1, 2순위의 중요한 기사로 채워라.
+        - **3순위(신한) 기사가 없으면 억지로 넣지 마라.** 1, 2순위 기사로 채워라.
         - 단순 행사 홍보, 인사 발령, 중복된 내용은 제외해라.
         """
     else:
