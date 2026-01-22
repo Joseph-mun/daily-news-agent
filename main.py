@@ -36,14 +36,13 @@ DOMAINS_EN = [
 ]
 
 # ==========================================
-# 3. 뉴스 검색 (본문 전체 수집)
+# 3. 뉴스 검색 (파이썬 강제 필터링 추가)
 # ==========================================
 def search_news():
     print(f"\n🔍 [1단계] Tavily 뉴스 검색 시작...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     collected = []
 
-    # 검색 쿼리 그룹
     targets = [
         ("정보보호 해킹 개인정보유출", DOMAINS_KR, "[국내]"),
         ("Cyber Security Hacking Data Breach", DOMAINS_EN, "[해외]")
@@ -51,38 +50,45 @@ def search_news():
 
     for query, domains, category in targets:
         try:
-            # days=3 옵션: 최근 3일치만 1차로 가져오기
+            # days=2로 더 쪼임
             res = tavily.search(
                 query=query, 
                 topic="news", 
-                days=3, 
+                days=2, 
                 search_depth="advanced",
                 include_domains=domains, 
-                max_results=15
+                max_results=50
             )
             
             for item in res.get('results', []):
-                # AI에게 날짜 판단을 맡기기 위해 메타데이터와 본문 수집
-                pub_date = item.get('published_date', '날짜없음')
+                pub_date = item.get('published_date', '')
+                title = item.get('title', '')
+                url = item.get('url', '')
                 
-                # [수정됨] 300자 제한 제거! 본문 전체(또는 Tavily가 제공하는 최대치)를 가져옴
-                content = item.get('content', '') 
+                # [★ 핵심 추가] 파이썬 강제 검문소
+                # Tavily가 준 날짜 데이터가 있는데, '2026'이 없으면 가차 없이 삭제
+                # (None이거나 날짜가 아예 없으면 AI에게 판단을 넘김)
+                if pub_date and '2026' not in pub_date:
+                    print(f"   🗑️ [삭제됨/과거기사] {pub_date} | {title[:20]}...")
+                    continue
+
+                content = item.get('content', '')
                 
                 collected.append({
                     "category": category,
-                    "title": item['title'],
-                    "url": item['url'],
+                    "title": title,
+                    "url": url,
                     "published_date": pub_date,
                     "content": content
                 })
         except Exception as e:
             print(f"❌ 검색 오류 ({category}): {e}")
 
-    print(f"👉 1차 수집된 기사: {len(collected)}건 (AI에게 정밀 날짜 검증 요청)")
+    print(f"👉 1차 필터링 후 남은 기사: {len(collected)}건 (AI 정밀 검수 진행)")
     return collected
 
 # ==========================================
-# 4. AI 필터링 (날짜 검증 로직 강화)
+# 4. AI 필터링 (본문 전체 정밀 분석)
 # ==========================================
 def ai_filter_and_format(news_list):
     if not news_list: return []
@@ -136,7 +142,6 @@ def ai_filter_and_format(news_list):
             if match:
                 results = json.loads(match.group())
                 
-                # [로그 출력] AI가 날짜를 어떻게 인식했는지 확인
                 print("\n📊 AI 검수 결과 로그:")
                 for item in results:
                     print(f"   ✅ 통과: {item['detected_date']} | {item['title'][:30]}...")
@@ -177,12 +182,9 @@ def send_kakaotalk(articles):
     access_token = get_kakao_access_token()
     if not access_token: return
 
-    # 넘버링 추가 로직
     message_text = f"🛡️ {TODAY_STR} 주요 보안 뉴스\n\n"
     
     for i, item in enumerate(articles, 1):
-        # 1. [국내] 기사제목
-        # URL
         message_text += f"{i}. {item['category']} {item['title']}\n{item['url']}\n\n"
     
     message_text += "끝."
