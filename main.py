@@ -37,8 +37,8 @@ def search_naver_news(query, category):
         "X-Naver-Client-Secret": NAVER_SECRET
     }
     
-    # 검색 결과 개수 설정
-    display_count = 50 
+    # 검색량을 늘려서(60개) AI가 고를 수 있는 후보를 많이 줍니다.
+    display_count = 60
     
     params = {
         "query": query,
@@ -58,11 +58,11 @@ def search_naver_news(query, category):
                     pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
                     pub_date_fmt = pub_dt.strftime("%Y-%m-%d")
                     
-                    # 어제 이후 기사만 통과
+                    # 어제 이후 기사만 통과 (파이썬이 1차로 거름)
                     if pub_date_fmt < YESTERDAY:
                         continue
                 except:
-                    pub_date_fmt = TODAY_STR # 날짜 파싱 실패 시 오늘로 간주하고 AI에게 넘김
+                    pub_date_fmt = TODAY_STR
 
                 # 2. 텍스트 정제
                 clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
@@ -86,12 +86,13 @@ def search_naver_news(query, category):
     return collected
 
 # ==========================================
-# 3. AI 필터링 (배치 처리)
+# 3. AI 필터링 (완화된 조건)
 # ==========================================
 def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # [수정] 프롬프트 대폭 수정 (트렌드/기술 포함, 필터링 완화)
     prompt = f"""
     오늘 날짜: {TODAY_STR}
     
@@ -99,10 +100,11 @@ def call_gemini_batch(batch_items):
     {json.dumps(batch_items)}
 
     [지시사항]
-    1. 각 기사의 내용을 보고 보안/해킹/개인정보와 관련된 중요 뉴스인지 판단해라.
-    2. 날짜가 **{YESTERDAY} 또는 {TODAY_STR}**인 최신 기사만 남겨라.
-    3. [해외] 카테고리 기사는 제목을 **자연스러운 한국어**로 번역해라.
-    4. 중복된 기사는 하나만 남겨라.
+    1. 너는 '보안 뉴스 큐레이터'다. **너무 엄격하게 기사를 버리지 마라.**
+    2. 단순 해킹 사고뿐만 아니라 **보안 신기술(AI, 제로트러스트), 시장 동향, 정책, 해외 트렌드** 기사도 적극적으로 포함해라.
+    3. 기사 본문에 날짜가 명시되어 있지 않다면, **입력 데이터의 'published_date'를 믿고 최신 기사로 간주해라.** (날짜 때문에 기사를 버리지 마라)
+    4. 중복된 내용이 있다면 하나만 남겨라.
+    5. [해외] 카테고리는 제목을 한국어로 자연스럽게 번역해라.
     
     [출력 포맷]
     JSON 리스트:
@@ -127,7 +129,7 @@ def call_gemini_batch(batch_items):
 
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 중...")
+    print("\n🤖 [2단계] AI 정밀 검수 중 (트렌드/기술 포함)...")
     
     final_results = []
     BATCH_SIZE = 5 
@@ -137,16 +139,17 @@ def ai_filter_and_format(news_list):
         results = call_gemini_batch(batch)
         if results:
             for item in results:
-                print(f"      ✅ 확보: {item.get('detected_date')} | {item['title'][:15]}...")
+                # 로그에 확보된 기사 제목 출력
+                print(f"      ✅ 확보: {item['title'][:15]}...")
                 final_results.extend(results)
         time.sleep(1)
 
     unique_results = {v['url']: v for v in final_results}.values()
     sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
     
-    # 국내 7개, 해외 3개 선정
+    # 국내 7개, 해외 5개 (해외 비중 늘림)
     kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
-    en_list = [x for x in sorted_results if "[해외]" in x['category']][:3]
+    en_list = [x for x in sorted_results if "[해외]" in x['category']][:5]
     
     return kr_list + en_list
 
@@ -189,8 +192,8 @@ def send_kakaotalk(articles):
             "object_type": "text",
             "text": message_text,
             "link": {
-                "web_url": "https://www.google.com/search?q=정보보호+해킹+뉴스&tbm=nws",
-                "mobile_web_url": "https://www.google.com/search?q=정보보호+해킹+뉴스&tbm=nws"
+                "web_url": "https://www.google.com/search?q=정보보호+동향&tbm=nws",
+                "mobile_web_url": "https://www.google.com/search?q=정보보호+동향&tbm=nws"
             },
             "button_title": "뉴스 더보기"
         })
@@ -206,13 +209,13 @@ def send_kakaotalk(articles):
 # 5. 메인 실행
 # ==========================================
 if __name__ == "__main__":
-    # [수정됨] 국내 뉴스 검색
-    kr_news = search_naver_news("정보보호 해킹 개인정보유출 보안 침해사고", "[국내]")
+    # [수정] 검색어 최적화 (국내 사고 위주)
+    kr_news = search_naver_news("정보보호 해킹 개인정보유출 보안사고", "[국내]")
     
-    # [수정됨] 해외 뉴스 검색 (영어 대신 '한국어'로 검색해야 네이버에서 나옵니다!)
-    # "해외 해킹", "글로벌 보안", "국제 해킹 사고", "미국 개인정보 유출" 등을 검색하면
-    # 국내 언론사가 다룬 최신 해외 보안 뉴스들이 검색됩니다.
-    en_news = search_naver_news("해외 해킹 글로벌 보안 국제 해킹 사고", "[해외]")
+    # [수정] 검색어 최적화 (해외 동향/기술 위주)
+    # 네이버에서 '해외' 뉴스를 찾기 위해 동향, 기술 관련 키워드를 대폭 추가
+    en_query = "글로벌 보안 동향 사이버보안 트렌드 미국 해킹 AI 보안 기술 제로트러스트 랜섬웨어 동향"
+    en_news = search_naver_news(en_query, "[해외]")
     
     all_news = kr_news + en_news
     
@@ -221,6 +224,6 @@ if __name__ == "__main__":
         if final_list:
             send_kakaotalk(final_list)
         else:
-            print("⚠️ AI 필터링 결과 없음")
+            print("⚠️ AI 필터링 결과 없음: 검색된 기사는 있지만 AI가 모두 걸러냈습니다.")
     else:
-        print("⚠️ 검색 결과 없음")
+        print("⚠️ 검색 결과 없음: 네이버 뉴스 API에서 아무것도 찾지 못했습니다.")
