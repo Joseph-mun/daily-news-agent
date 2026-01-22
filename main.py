@@ -36,7 +36,7 @@ DOMAINS_EN = [
 ]
 
 # ==========================================
-# 3. 뉴스 검색 (파이썬 강제 필터링 추가)
+# 3. 뉴스 검색 (광범위 수집 -> 정밀 필터링 -> 상위 25개 추출)
 # ==========================================
 def search_news():
     print(f"\n🔍 [1단계] Tavily 뉴스 검색 시작...")
@@ -50,78 +50,73 @@ def search_news():
 
     for query, domains, category in targets:
         try:
-            # days=2로 더 쪼임
+            # [전략 변경] 일단 넉넉하게 40개씩 요청 (쓰레기 데이터 걸러낼 여유 확보)
             res = tavily.search(
                 query=query, 
                 topic="news", 
                 days=2, 
                 search_depth="advanced",
                 include_domains=domains, 
-                max_results=50
+                max_results=40 
             )
+            
+            temp_list = []
             
             for item in res.get('results', []):
                 pub_date = item.get('published_date', '')
-                title = item.get('title', '')
-                url = item.get('url', '')
+                if pub_date is None: pub_date = ""
                 
-                # [★ 핵심 추가] 파이썬 강제 검문소
-                # Tavily가 준 날짜 데이터가 있는데, '2026'이 없으면 가차 없이 삭제
-                # (None이거나 날짜가 아예 없으면 AI에게 판단을 넘김)
-                if pub_date and '2026' not in pub_date:
-                    print(f"   🗑️ [삭제됨/과거기사] {pub_date} | {title[:20]}...")
-                    continue
+                # [강력 필터] 날짜 정보가 있고, '2026'이나 'ago'(시간 전)가 없으면 과감히 버림
+                # 예: '2021-05...', '2024-12...' -> 탈락
+                # 예: '2026-01...', '2 hours ago' -> 통과
+                if pub_date and ('2026' not in pub_date and 'ago' not in pub_date):
+                     continue
 
+                title = item.get('title', '')
                 content = item.get('content', '')
                 
-                collected.append({
+                temp_list.append({
                     "category": category,
                     "title": title,
-                    "url": url,
+                    "url": item['url'],
                     "published_date": pub_date,
                     "content": content
                 })
+            
+            # [최종 커팅] 필터를 통과한 '알짜배기' 중에서 앞에서부터 25개만 선정
+            selected_items = temp_list[:25]
+            collected.extend(selected_items)
+            
+            print(f"   👉 {category}: 40개 검색 -> 필터링 후 {len(selected_items)}개 선정")
+
         except Exception as e:
             print(f"❌ 검색 오류 ({category}): {e}")
 
-    print(f"👉 1차 필터링 후 남은 기사: {len(collected)}건 (AI 정밀 검수 진행)")
+    print(f"👉 총 수집된 기사: {len(collected)}건 (AI 정밀 검수 진행)")
     return collected
 
 # ==========================================
-# 4. AI 필터링 (본문 전체 정밀 분석)
+# 4. AI 필터링 (배치 처리 + 본문 전체 분석)
 # ==========================================
-def ai_filter_and_format(news_list):
-    if not news_list: return []
-    print("\n🤖 [2단계] AI 정밀 검수 (본문 전체 분석 중)...")
-    
+def call_gemini_batch(batch_items):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
-    너는 깐깐한 보안 뉴스 편집장이다. 
-    오늘 날짜: {TODAY_STR}
-    어제 날짜: {YESTERDAY}
+    오늘: {TODAY_STR} / 어제: {YESTERDAY}
     
     [입력 데이터]
-    {json.dumps(news_list)}
+    {json.dumps(batch_items)}
 
-    [작업 지시]
-    1. 각 기사의 'published_date'와 **'content'(본문 전체)**를 분석하여 **기사가 발행된 정확한 날짜**를 찾아라.
-    2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간 이내)**에 발행된 기사만 남겨라. 
-    3. 남은 기사 중 [국내] 상위 7개, [해외] 상위 3개를 중요도 순으로 선별해라.
-    4. 해외 기사 제목은 **자연스러운 한국어**로 번역해라.
-    5. **요약은 하지 마라.** 오직 제목과 URL만 필요하다.
+    [지시사항]
+    1. 각 기사의 'published_date'와 'content'를 분석해 정확한 발행일을 찾아라.
+    2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간)** 기사만 남겨라.
+    3. 남은 기사의 제목은 한국어로 번역하고, 요약 없이 제목/URL만 남겨라.
     
-    [출력 포맷 - 중요]
-    검증을 위해 **'detected_date'(AI가 찾은 날짜)** 필드를 반드시 포함해라.
-    JSON 리스트 형식:
+    [출력 포맷]
+    JSON 리스트:
     [
-      {{ 
-        "category": "[국내] 또는 [해외]", 
-        "title": "기사 제목", 
-        "url": "링크", 
-        "detected_date": "찾아낸 날짜(YYYY-MM-DD)" 
-      }}
+      {{ "category": "[국내]or[해외]", "title": "제목", "url": "링크", "detected_date": "YYYY-MM-DD" }}
     ]
     """
     
@@ -130,32 +125,43 @@ def ai_filter_and_format(news_list):
     try:
         res = requests.post(url, headers=headers, json=data)
         if res.status_code == 200:
-            res_json = res.json()
-            if 'candidates' not in res_json:
-                print("❌ AI 응답 없음 (Candidates Empty)")
-                return []
-
-            text = res_json['candidates'][0]['content']['parts'][0]['text']
+            text = res.json()['candidates'][0]['content']['parts'][0]['text']
             clean_text = text.replace("```json", "").replace("```", "").strip()
-            
             match = re.search(r'\[.*\]', clean_text, re.DOTALL)
             if match:
-                results = json.loads(match.group())
-                
-                print("\n📊 AI 검수 결과 로그:")
-                for item in results:
-                    print(f"   ✅ 통과: {item['detected_date']} | {item['title'][:30]}...")
-                    
-                return results
-            else:
-                print("⚠️ JSON 파싱 실패")
-        else:
-            print(f"❌ API 오류: {res.status_code}")
-            print(res.text)
+                return json.loads(match.group())
     except Exception as e:
-        print(f"❌ AI 연결 오류: {e}")
+        print(f"    ⚠️ 배치 처리 중 에러: {e}")
     
     return []
+
+def ai_filter_and_format(news_list):
+    if not news_list: return []
+    print("\n🤖 [2단계] AI 정밀 검수 (배치 처리 시작)...")
+    
+    final_results = []
+    # 5개씩 끊어서 처리
+    BATCH_SIZE = 5 
+    
+    for i in range(0, len(news_list), BATCH_SIZE):
+        batch = news_list[i : i + BATCH_SIZE]
+        print(f"   📡 {i+1}~{i+len(batch)}번째 기사 분석 중...")
+        
+        results = call_gemini_batch(batch)
+        if results:
+            for item in results:
+                print(f"      ✅ 확보: {item.get('detected_date')} | {item['title'][:20]}...")
+                final_results.extend(results)
+        
+        time.sleep(2)
+
+    unique_results = {v['url']: v for v in final_results}.values()
+    sorted_results = sorted(unique_results, key=lambda x: x.get('detected_date', ''), reverse=True)
+    
+    kr_list = [x for x in sorted_results if "[국내]" in x['category']][:7]
+    en_list = [x for x in sorted_results if "[해외]" in x['category']][:3]
+    
+    return kr_list + en_list
 
 # ==========================================
 # 5. 카카오톡 전송
