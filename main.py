@@ -3,19 +3,22 @@ import json
 import requests
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from tavily import TavilyClient
 
 # ==========================================
-# 1. 환경변수 설정
+# 1. 환경변수 및 날짜 설정
 # ==========================================
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")       # REST API 키
-KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN") # 리프레시 토큰
+KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
+KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
 
 NOW = datetime.now()
 TODAY_STR = NOW.strftime("%Y-%m-%d")
+YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
+
+print(f"📅 기준 날짜: {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
 
 # ==========================================
 # 2. 도메인 리스트
@@ -33,14 +36,14 @@ DOMAINS_EN = [
 ]
 
 # ==========================================
-# 3. 뉴스 검색
+# 3. 뉴스 검색 (날짜 데이터 확보 및 1차 필터)
 # ==========================================
 def search_news():
-    print(f"🔍 뉴스 수집 시작: {TODAY_STR}")
+    print(f"\n🔍 [1단계] Tavily 뉴스 검색 시작...")
     tavily = TavilyClient(api_key=TAVILY_KEY)
     collected = []
 
-    # 통합 검색 (쿼리 단순화)
+    # 검색 쿼리 그룹
     targets = [
         ("정보보호 해킹 개인정보유출", DOMAINS_KR, "[국내]"),
         ("Cyber Security Hacking Data Breach", DOMAINS_EN, "[해외]")
@@ -48,52 +51,70 @@ def search_news():
 
     for query, domains, category in targets:
         try:
+            # days=3 옵션 추가: 최근 3일치만 1차로 가져오기
             res = tavily.search(
-                query=query, topic="news", search_depth="advanced",
-                include_domains=domains, max_results=20
+                query=query, 
+                topic="news", 
+                days=3, 
+                search_depth="advanced",
+                include_domains=domains, 
+                max_results=15
             )
+            
             for item in res.get('results', []):
-                item['category'] = category
-                # 토큰 절약을 위해 본문은 아예 제거하고 제목/URL만 남김
+                # AI에게 판단을 맡기기 위해 'published_date'와 'content'를 함께 수집
+                pub_date = item.get('published_date', '날짜없음')
+                content = item.get('content', '')[:300] # 본문 앞 300자만
+                
                 collected.append({
+                    "category": category,
                     "title": item['title'],
                     "url": item['url'],
-                    "category": category
+                    "published_date": pub_date,
+                    "content": content
                 })
         except Exception as e:
             print(f"❌ 검색 오류 ({category}): {e}")
 
-    print(f"👉 총 수집 기사: {len(collected)}건")
+    print(f"👉 1차 수집된 기사: {len(collected)}건 (AI에게 날짜 검증 요청)")
     return collected
 
 # ==========================================
-# 4. AI 필터링 (제목/URL만 추출)
+# 4. AI 필터링 (날짜 검증 로직 강화)
 # ==========================================
 def ai_filter_and_format(news_list):
     if not news_list: return []
-    print("🤖 AI 필터링 시작...")
+    print("\n🤖 [2단계] AI 정밀 검수 (날짜 확인 중)...")
     
-    # 배치 처리 없이 한 번에 보내도 됨 (요약이 없어서 데이터가 작음)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # [수정] 사용자 요청 사항 반영된 강력한 프롬프트
     prompt = f"""
+    너는 깐깐한 보안 뉴스 편집장이다. 
     오늘 날짜: {TODAY_STR}
+    어제 날짜: {YESTERDAY}
     
     [입력 데이터]
     {json.dumps(news_list)}
 
-    [지시사항]
-    1. 기사 전체를 스캔하여 날짜 중에서 **기사가 발행된 날짜**를 찾아라
-    2. **오늘 날짜로부터 1일 이내**에 발생한 최신 보안 뉴스만 남겨라. (과거 기사 삭제)
-    3. [국내] 상위 7개, [해외] 상위 3개를 선별해라.
-    4. 해외 기사 제목은 **한국어로 번역**해라.
-    5. **요약은 하지 마라.** 오직 제목과 URL만 필요하다.
+    [작업 지시]
+    1. 각 기사의 'published_date'와 'content'를 분석하여 **기사가 발행된 정확한 날짜**를 찾아라.
+    2. **반드시 {YESTERDAY} 또는 {TODAY_STR} (최근 24시간 이내)**에 발행된 기사만 남겨라. 
+       (2021년, 2025년 등 과거 기사는 무조건 삭제해라.)
+    3. 남은 기사 중 [국내] 상위 7개, [해외] 상위 3개를 중요도 순으로 선별해라.
+    4. 해외 기사 제목은 **자연스러운 한국어**로 번역해라.
     
-    [출력 포맷]
-    JSON 리스트:
+    [출력 포맷 - 중요]
+    검증을 위해 **'detected_date'(AI가 찾은 날짜)** 필드를 반드시 포함해라.
+    JSON 리스트 형식:
     [
-      {{ "category": "[국내] 또는 [해외]", "title": "기사 제목", "url": "링크" }}
+      {{ 
+        "category": "[국내] 또는 [해외]", 
+        "title": "기사 제목", 
+        "url": "링크", 
+        "detected_date": "찾아낸 날짜(YYYY-MM-DD)" 
+      }}
     ]
     """
     
@@ -104,19 +125,30 @@ def ai_filter_and_format(news_list):
         if res.status_code == 200:
             text = res.json()['candidates'][0]['content']['parts'][0]['text']
             clean_text = text.replace("```json", "").replace("```", "").strip()
+            
             match = re.search(r'\[.*\]', clean_text, re.DOTALL)
             if match:
-                return json.loads(match.group())
+                results = json.loads(match.group())
+                
+                # [로그 출력] AI가 날짜를 어떻게 인식했는지 확인
+                print("\n📊 AI 검수 결과 로그:")
+                for item in results:
+                    print(f"   ✅ 통과: {item['detected_date']} | {item['title'][:30]}...")
+                    
+                return results
+            else:
+                print("⚠️ JSON 파싱 실패")
+        else:
+            print(f"❌ API 오류: {res.status_code}")
     except Exception as e:
-        print(f"❌ AI 오류: {e}")
+        print(f"❌ AI 연결 오류: {e}")
     
     return []
 
 # ==========================================
-# 5. 카카오톡 전송 로직
+# 5. 카카오톡 전송 (넘버링 추가)
 # ==========================================
 def get_kakao_access_token():
-    """리프레시 토큰으로 새로운 액세스 토큰 발급"""
     url = "https://kauth.kakao.com/oauth/token"
     data = {
         "grant_type": "refresh_token",
@@ -124,33 +156,30 @@ def get_kakao_access_token():
         "refresh_token": KAKAO_REFRESH_TOKEN
     }
     res = requests.post(url, data=data)
-    tokens = res.json()
-    
-    if "access_token" in tokens:
-        return tokens["access_token"]
-    else:
-        print(f"❌ 토큰 갱신 실패: {tokens}")
+    if res.status_code != 200:
+        print(f"❌ 토큰 갱신 실패: {res.text}")
         return None
+    return res.json().get("access_token")
 
 def send_kakaotalk(articles):
     if not articles:
-        print("⚠️ 보낼 기사가 없습니다.")
+        print("⚠️ 전송할 유효 기사가 없습니다.")
         return
 
-    print("🚀 카카오톡 전송 준비...")
+    print("\n🚀 [3단계] 카카오톡 전송 중...")
     access_token = get_kakao_access_token()
     if not access_token: return
 
-    # 메시지 본문 구성 (텍스트 형태)
+    # [수정] 넘버링 추가 로직
     message_text = f"🛡️ {TODAY_STR} 주요 보안 뉴스\n\n"
     
-    for item in articles:
-        # 예: [국내] 해킹 사고 발생\nhttp://...\n
-        message_text += f"{item['category']} {item['title']}\n{item['url']}\n\n"
+    for i, item in enumerate(articles, 1):
+        # 1. [국내] 기사제목
+        # URL
+        message_text += f"{i}. {item['category']} {item['title']}\n{item['url']}\n\n"
     
     message_text += "끝."
 
-    # 카톡 나에게 보내기 API 호출
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {access_token}"}
     data = {
@@ -158,10 +187,10 @@ def send_kakaotalk(articles):
             "object_type": "text",
             "text": message_text,
             "link": {
-                "web_url": "https://www.google.com",
-                "mobile_web_url": "https://www.google.com"
+                "web_url": "https://m.naver.com",
+                "mobile_web_url": "https://m.naver.com"
             },
-            "button_title": "뉴스 확인"
+            "button_title": "뉴스 더보기"
         })
     }
     
@@ -181,6 +210,6 @@ if __name__ == "__main__":
         if final_list:
             send_kakaotalk(final_list)
         else:
-            print("⚠️ AI 필터링 결과 없음")
+            print("⚠️ AI 필터링 결과: 적합한 최신 기사가 없습니다.")
     else:
-        print("⚠️ 검색 결과 없음")
+        print("⚠️ 검색된 기사가 없습니다.")
