@@ -23,10 +23,9 @@ YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
 print(f"📅 기준 날짜: {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
 
 # ==========================================
-# 2. 국내 뉴스 검색 (네이버 API - 루프 검색 방식)
+# 2. 국내 뉴스 검색 (네이버 API - 루프 검색)
 # ==========================================
 def search_naver_news():
-    # [수정] 단일 쿼리 대신 리스트로 분리하여 각각 검색 후 병합
     keywords = ["정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어"]
     print(f"\n🇰🇷 [국내] 네이버 분할 검색 시작: {keywords}")
     
@@ -37,19 +36,16 @@ def search_naver_news():
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET}
     
-    all_collected = {} # URL을 키로 사용하여 중복 제거
+    all_collected = {} 
 
     for keyword in keywords:
         try:
-            # 키워드당 15개씩만 가져와서 합침
             params = {"query": keyword, "display": 15, "sort": "date"}
             res = requests.get(url, headers=headers, params=params)
             
             if res.status_code == 200:
                 items = res.json().get('items', [])
-                count = 0
                 for item in items:
-                    # 파이썬 날짜 필터
                     try:
                         pub_date_str = item['pubDate']
                         pub_dt = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S +0900")
@@ -60,9 +56,7 @@ def search_naver_news():
 
                     link = item['originallink'] or item['link']
                     
-                    # 이미 수집된 기사면 패스 (중복 제거)
-                    if link in all_collected:
-                        continue
+                    if link in all_collected: continue
 
                     clean_title = re.sub('<.+?>', '', item['title']).replace("&quot;", "'").replace("&amp;", "&")
                     clean_desc = re.sub('<.+?>', '', item['description']).replace("&quot;", "'").replace("&amp;", "&")
@@ -74,20 +68,25 @@ def search_naver_news():
                         "published_date": pub_date_fmt,
                         "description": clean_desc
                     }
-                    count += 1
-                # print(f"   - '{keyword}': {count}건 추가")
-            else:
-                print(f"   ❌ '{keyword}' 검색 실패: {res.status_code}")
-                
         except Exception as e:
             print(f"   ❌ 요청 오류: {e}")
             
     final_list = list(all_collected.values())
-    print(f"   👉 국내 후보 총 {len(final_list)}건 확보 (중복 제거 완료)")
+    print(f"   👉 국내 후보 총 {len(final_list)}건 확보")
+    
+    # [스마트 압축] "신한"이 들어간 기사를 리스트 맨 앞으로 올림
+    # 그래야 뒤에서 40개로 자를 때 신한 기사가 안 잘려나감
+    final_list.sort(key=lambda x: 0 if '신한' in x['title'] or '신한' in x['description'] else 1)
+    
+    # 너무 많으면 AI 전송 중 끊기므로 상위 40개만 남김
+    if len(final_list) > 40:
+        final_list = final_list[:40]
+        print(f"   ✂️ AI 전송 안정성을 위해 상위 40개로 압축 (신한 관련 우선 포함)")
+        
     return final_list
 
 # ==========================================
-# 3. 해외 뉴스 검색 (Tavily + 강력 날짜 필터)
+# 3. 해외 뉴스 검색 (Tavily + 강력 필터)
 # ==========================================
 def search_tavily_news():
     print(f"\n🇺🇸 [해외] Tavily 검색 시작...")
@@ -103,7 +102,6 @@ def search_tavily_news():
     ]
     
     try:
-        # 1. 넉넉하게 40개 요청
         res = tavily.search(
             query="Cyber Security Breach Hacking News", 
             topic="news", 
@@ -112,13 +110,11 @@ def search_tavily_news():
             max_results=40
         )
         
-        # 2. 파이썬 강력 필터
         collected = []
         for item in res.get('results', []):
             pub_date = item.get('published_date', '')
             if pub_date is None: pub_date = ""
             
-            # 2026년 또는 ago가 없으면 AI에게 보내지도 않음
             if pub_date and ('2026' not in pub_date and 'ago' not in pub_date):
                  continue
 
@@ -130,7 +126,6 @@ def search_tavily_news():
                 "description": item.get('content', '')[:200]
             })
         
-        # 3. 상위 20개만 AI 후보군으로 선정
         collected = collected[:20]
         print(f"   👉 해외 후보 {len(collected)}개 확보 (필터링 완료)")
         return collected
@@ -140,7 +135,7 @@ def search_tavily_news():
         return []
 
 # ==========================================
-# 4. AI 선별 (우선순위 로직)
+# 4. AI 선별 (재시도 로직 수정)
 # ==========================================
 def call_gemini_priority_selection(items, mode):
     if not items: return []
@@ -150,14 +145,13 @@ def call_gemini_priority_selection(items, mode):
     
     if mode == 'KR':
         target_count = 7
-        # 국내 뉴스 우선순위 가이드라인
         system_instruction = """
         너는 '금융권 보안 뉴스 큐레이터'다. 
         입력된 뉴스 목록 중에서 다음 **우선순위(Priority)**에 따라 **상위 7개** 기사를 엄선해라.
 
         [우선순위 채점 기준]
         1. **1순위 (최우선):** 해킹 사고, 개인정보 유출, 랜섬웨어 등 실제 발생한 **침해 사고**.
-        2. **2순위 (중요):** 금융보안원 발표, 금감원 규제, 최신 보안 기술 동향(AI, 망분리 등).
+        2. **2순위 (중요):** 금융보안원 발표, 금감원 규제, 최신 보안 기술 동향.
         3. **3순위 (참고):** '신한금융', '신한은행' 등 신한 계열사의 보안/디지털 관련 소식.
         
         [주의사항]
@@ -166,12 +160,9 @@ def call_gemini_priority_selection(items, mode):
         """
     else:
         target_count = 3
-        # 해외 뉴스 가이드라인
         system_instruction = """
         너는 '글로벌 보안 트렌드 분석가'이다.
         입력된 뉴스 목록 중에서 **가장 파급력이 큰 3개** 기사를 선정해라.
-        
-        [지시사항]
         1. 기사 제목을 반드시 **자연스러운 한국어**로 번역해라.
         2. 우선순위: 대규모 데이터 유출 > 제로데이 취약점 > 글로벌 보안 정책.
         3. 'detected_date' 필드에는 입력된 날짜를 그대로 유지해라.
@@ -193,7 +184,7 @@ def call_gemini_priority_selection(items, mode):
     
     data = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    # 429 에러 방지용 재시도 로직
+    # [수정된 재시도 로직] 연결 끊김도 잡아서 재시도
     for attempt in range(3):
         try:
             res = requests.post(url, headers=headers, json=data)
@@ -214,12 +205,19 @@ def call_gemini_priority_selection(items, mode):
                 continue
             else:
                 print(f"    ❌ API 오류: {res.status_code}")
+                # 500번대 서버 에러일 경우 재시도
+                if res.status_code >= 500:
+                    time.sleep(5)
+                    continue
                 return []
                 
         except Exception as e:
-            print(f"    ❌ 연결 오류: {e}")
-            return []
+            # [여기가 핵심] 연결 끊김(RemoteDisconnected) 발생 시 포기하지 않고 재시도
+            print(f"    ⚠️ [연결 불안정] {e}. 5초 후 재시도 ({attempt+1}/3)...")
+            time.sleep(5)
+            continue
             
+    print(f"    ❌ 3회 재시도 실패 ({mode})")
     return []
 
 def process_news():
@@ -239,7 +237,7 @@ def process_news():
         print("   ⚠️ 국내 후보 기사가 없습니다.")
         
     # API 휴식
-    time.sleep(2)
+    time.sleep(3)
     
     # 3. 해외 선별 (3개)
     if en_candidates:
