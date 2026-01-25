@@ -1,9 +1,9 @@
 """
-금융권 보안 뉴스 수집 및 카카오톡 전송 봇
+금융권 보안 뉴스 수집 및 카카오톡/텔레그램 전송 봇
 
 이 스크립트는 네이버 뉴스 API와 Tavily API를 사용하여
 금융권 보안 관련 뉴스를 수집하고, Gemini AI로 선별한 후
-카카오톡으로 전송합니다.
+카카오톡과 텔레그램으로 전송합니다.
 """
 
 import os
@@ -35,6 +35,8 @@ TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
 KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 NOW = datetime.now()
 TODAY_STR = NOW.strftime("%Y-%m-%d")
@@ -459,6 +461,108 @@ def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
 
 
 # ==========================================
+# 텔레그램 전송
+# ==========================================
+def send_telegram(articles: List[Dict[str, str]]) -> bool:
+    """
+    선별된 뉴스 기사를 텔레그램으로 전송합니다.
+    
+    Args:
+        articles: 전송할 뉴스 기사 리스트
+    
+    Returns:
+        bool: 전송 성공 여부
+    """
+    if not articles:
+        logger.warning("⚠️ 전송할 기사가 없습니다.")
+        return False
+
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("⚠️ 텔레그램 설정이 없어 텔레그램 전송을 건너뜁니다.")
+        return False
+
+    logger.info("\n📱 텔레그램 전송 중...")
+    
+    # 텔레그램 메시지 구성 (4096자 제한 고려)
+    message_text = f"🛡️ *{TODAY_STR} 보안 브리핑*\n\n"
+    
+    for i, item in enumerate(articles, 1):
+        title = item.get('title', '').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+        url = item.get('url', '')
+        category = item.get('category', '')
+        
+        message_text += f"{i}\\. {category} *{title}*\n"
+        message_text += f"{url}\n\n"
+    
+    message_text += "_끝\\._"
+    
+    # 텔레그램 메시지 길이 제한 (4096자) 확인 및 분할
+    max_length = 4096
+    if len(message_text) > max_length:
+        # 메시지가 너무 길면 여러 개로 분할
+        messages = []
+        current_message = f"🛡️ *{TODAY_STR} 보안 브리핑*\n\n"
+        
+        for i, item in enumerate(articles, 1):
+            title = item.get('title', '').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+            url = item.get('url', '')
+            category = item.get('category', '')
+            
+            new_line = f"{i}\\. {category} *{title}*\n{url}\n\n"
+            
+            if len(current_message) + len(new_line) > max_length - 50:  # 여유 공간 확보
+                messages.append(current_message + "_계속\\..._")
+                current_message = f"🛡️ *{TODAY_STR} 보안 브리핑 (계속)*\n\n"
+            
+            current_message += new_line
+        
+        current_message += "_끝\\._"
+        messages.append(current_message)
+    else:
+        messages = [message_text]
+    
+    # 텔레그램 API로 메시지 전송
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    success_count = 0
+    for msg in messages:
+        try:
+            data = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": msg,
+                "parse_mode": "MarkdownV2",
+                "disable_web_page_preview": False
+            }
+            
+            res = requests.post(url, json=data, timeout=10)
+            
+            if res.status_code == 200:
+                success_count += 1
+                logger.info(f"   ✅ 텔레그램 메시지 {success_count}/{len(messages)} 전송 완료")
+            else:
+                logger.error(f"   ❌ 텔레그램 전송 실패: {res.status_code} - {res.text[:200]}")
+                return False
+                
+            # 메시지 간 짧은 대기 (API 레이트 리밋 방지)
+            if len(messages) > 1:
+                time.sleep(1)
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"   ❌ 텔레그램 전송 중 네트워크 오류: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"   ❌ 텔레그램 전송 중 오류: {e}")
+            return False
+    
+    if success_count == len(messages):
+        logger.info("✅ 텔레그램 전송 완료")
+        return True
+    else:
+        logger.warning(f"⚠️ 텔레그램 전송 부분 실패 ({success_count}/{len(messages)})")
+        return False
+
+
+# ==========================================
 # 메인 실행
 # ==========================================
 def main():
@@ -473,6 +577,7 @@ def main():
         if final_news:
             logger.info(f"\n📊 최종 선별된 뉴스: {len(final_news)}개")
             send_kakaotalk(final_news)
+            send_telegram(final_news)
         else:
             logger.warning("⚠️ 최종 선별된 뉴스가 없습니다.")
             
