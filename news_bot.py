@@ -481,6 +481,16 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         logger.warning("⚠️ 텔레그램 설정이 없어 텔레그램 전송을 건너뜁니다.")
         return False
 
+    # 채팅 ID 검증 및 변환 (숫자 문자열로 변환)
+    try:
+        chat_id = str(TELEGRAM_CHAT_ID).strip()
+        # 숫자로 변환 가능한지 확인
+        int(chat_id)
+    except ValueError:
+        logger.error(f"❌ 텔레그램 채팅 ID가 올바르지 않습니다: {TELEGRAM_CHAT_ID}")
+        logger.error("   💡 채팅 ID는 숫자여야 합니다. 개인 채팅의 경우 봇에게 먼저 메시지를 보내야 합니다.")
+        return False
+
     logger.info("\n📱 텔레그램 전송 중...")
     
     # HTML 특수문자 이스케이프 함수
@@ -537,7 +547,7 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
     for msg in messages:
         try:
             data = {
-                "chat_id": TELEGRAM_CHAT_ID,
+                "chat_id": chat_id,
                 "text": msg,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
@@ -549,7 +559,22 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
                 success_count += 1
                 logger.info(f"   ✅ 텔레그램 메시지 {success_count}/{len(messages)} 전송 완료")
             else:
-                logger.error(f"   ❌ 텔레그램 전송 실패: {res.status_code} - {res.text[:200]}")
+                error_response = res.json() if res.text else {}
+                error_description = error_response.get('description', res.text[:200])
+                error_code = error_response.get('error_code', res.status_code)
+                
+                logger.error(f"   ❌ 텔레그램 전송 실패: {error_code} - {error_description}")
+                
+                # 자세한 오류 안내
+                if "chat not found" in error_description.lower():
+                    logger.error("   💡 해결 방법:")
+                    logger.error("      1. 개인 채팅: 봇에게 먼저 메시지를 보내세요 (/start)")
+                    logger.error("      2. 그룹 채팅: 봇을 그룹에 추가하고 관리자 권한을 부여하세요")
+                    logger.error("      3. 채팅 ID 확인: @userinfobot에게 메시지를 보내서 ID를 확인하세요")
+                    logger.error(f"      4. 현재 채팅 ID: {chat_id}")
+                elif "unauthorized" in error_description.lower():
+                    logger.error("   💡 봇 토큰이 올바르지 않습니다. GitHub Secrets를 확인하세요.")
+                
                 return False
                 
             # 메시지 간 짧은 대기 (API 레이트 리밋 방지)
