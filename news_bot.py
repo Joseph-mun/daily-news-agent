@@ -483,40 +483,49 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
 
     logger.info("\n📱 텔레그램 전송 중...")
     
+    # HTML 특수문자 이스케이프 함수
+    def escape_html(text: str) -> str:
+        """HTML 모드에서 사용할 수 있도록 특수문자를 이스케이프합니다."""
+        if not text:
+            return ""
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;'))
+    
     # 텔레그램 메시지 구성 (4096자 제한 고려)
-    message_text = f"🛡️ *{TODAY_STR} 보안 브리핑*\n\n"
+    message_text = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
     
     for i, item in enumerate(articles, 1):
-        title = item.get('title', '').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+        title = escape_html(item.get('title', ''))
         url = item.get('url', '')
-        category = item.get('category', '')
+        category = escape_html(item.get('category', ''))
         
-        message_text += f"{i}\\. {category} *{title}*\n"
-        message_text += f"{url}\n\n"
+        message_text += f"{i}. {category} <b>{title}</b>\n"
+        message_text += f"<a href=\"{url}\">{url}</a>\n\n"
     
-    message_text += "_끝\\._"
+    message_text += "<i>끝.</i>"
     
     # 텔레그램 메시지 길이 제한 (4096자) 확인 및 분할
     max_length = 4096
     if len(message_text) > max_length:
         # 메시지가 너무 길면 여러 개로 분할
         messages = []
-        current_message = f"🛡️ *{TODAY_STR} 보안 브리핑*\n\n"
+        current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
         
         for i, item in enumerate(articles, 1):
-            title = item.get('title', '').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+            title = escape_html(item.get('title', ''))
             url = item.get('url', '')
-            category = item.get('category', '')
+            category = escape_html(item.get('category', ''))
             
-            new_line = f"{i}\\. {category} *{title}*\n{url}\n\n"
+            new_line = f"{i}. {category} <b>{title}</b>\n<a href=\"{url}\">{url}</a>\n\n"
             
             if len(current_message) + len(new_line) > max_length - 50:  # 여유 공간 확보
-                messages.append(current_message + "_계속\\..._")
-                current_message = f"🛡️ *{TODAY_STR} 보안 브리핑 (계속)*\n\n"
+                messages.append(current_message + "<i>계속...</i>")
+                current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑 (계속)</b>\n\n"
             
             current_message += new_line
         
-        current_message += "_끝\\._"
+        current_message += "<i>끝.</i>"
         messages.append(current_message)
     else:
         messages = [message_text]
@@ -530,7 +539,7 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
             data = {
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": msg,
-                "parse_mode": "MarkdownV2",
+                "parse_mode": "HTML",
                 "disable_web_page_preview": False
             }
             
