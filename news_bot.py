@@ -125,13 +125,36 @@ def search_naver_news() -> List[Dict[str, str]]:
     final_list = list(all_collected.values())
     logger.info(f"   👉 국내 후보 총 {len(final_list)}건 확보")
     
-    # 신한 관련 기사 우선 배치
-    final_list.sort(key=lambda x: 0 if '신한' in x['title'] or '신한' in x['description'] else 1)
+    # 우선순위 점수 계산 함수
+    def calculate_priority_score(article: Dict[str, str]) -> int:
+        """기사의 우선순위 점수를 계산합니다."""
+        score = 0
+        title = article['title'].lower()
+        desc = article['description'].lower()
+        
+        # 1순위 키워드 (침해사고) - 10점
+        high_priority = ['해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
+        score += sum(10 for k in high_priority if k in title or k in desc)
+        
+        # 2순위 키워드 (제도/기술) - 5점
+        mid_priority = ['금융보안원', '금감원', '규제', '보안기술', '제로데이', '취약점']
+        score += sum(5 for k in mid_priority if k in title or k in desc)
+        
+        # 3순위 키워드 (신한) - 3점
+        if '신한' in title or '신한' in desc:
+            score += 3
+        
+        # 날짜 가중치 (당일 기사 우대) - 2점
+        if article['published_date'] == TODAY_STR:
+            score += 2
+        
+        return score
     
-    # 상위 40개로 제한
-    if len(final_list) > 40:
-        final_list = final_list[:40]
-        logger.info(f"   ✂️ 상위 40개로 압축 (신한 우선)")
+    # 점수순으로 정렬하여 상위 20개만 선택
+    final_list.sort(key=calculate_priority_score, reverse=True)
+    if len(final_list) > 20:
+        final_list = final_list[:20]
+        logger.info(f"   ✂️ 상위 20개로 압축 (우선순위 기반 선별)")
         
     return final_list
 
@@ -230,17 +253,42 @@ def call_gemini_priority_selection(
     if mode == 'KR':
         target_count = 7
         system_instruction = """
-        너는 '금융권 보안 뉴스 큐레이터'다. 
-        입력된 뉴스 목록 중에서 다음 **우선순위**에 따라 **상위 7개** 기사를 엄선해라.
+        너는 금융권 보안 뉴스 전문 큐레이터다.
+        입력된 뉴스를 아래 평가 기준으로 점수화하고, 상위 7개를 선정해라.
 
-        [우선순위 채점 기준]
-        1. **1순위 (최우선):** 해킹 사고, 개인정보 유출, 랜섬웨어 등 실제 발생한 **침해 사고**.
-        2. **2순위 (중요):** 금융보안원 발표, 금감원 규제, 최신 보안 기술 동향.
-        3. **3순위 (참고):** '신한금융', '신한은행' 등 신한 계열사 소식 (없으면 생략).
-        
-        [절대 규칙]
-        - **제목을 절대 수정하거나 요약하지 마라.** (오타 발생 원인이 된다. 원문 그대로 복사해라.)
-        - 단순 홍보, 인사 발령, 중복된 내용은 제외해라.
+        [평가 점수표]
+        1. 침해사고 관련 (10점)
+           - 실제 해킹/랜섬웨어 발생 사건
+           - 개인정보/금융정보 유출 사고
+           - 사이버 공격으로 인한 피해
+           
+        2. 규제/정책 (7점)
+           - 금융보안원, 금감원 발표
+           - 새로운 보안 규제/가이드라인
+           - 법률 개정
+           
+        3. 기술/취약점 (5점)
+           - 제로데이 취약점 발견
+           - 새로운 공격 기법
+           - 보안 기술 동향
+           
+        4. 신한 관련 (3점 가산)
+           - 신한금융그룹 계열사 관련 뉴스
+           
+        5. 제외 대상 (-점수)
+           - 단순 홍보성 기사
+           - 인사 발령
+           - 중복 내용
+
+        [선정 절차]
+        1. 각 기사를 위 기준으로 평가
+        2. 같은 사건의 중복 기사는 1개만 선택
+        3. 다양한 카테고리에서 균형있게 선택
+        4. 최종 7개 선정
+
+        [출력 규칙]
+        - 제목은 원문 그대로 수정 없이
+        - detected_date 형식: YYYY-MM-DD
         """
     else:
         target_count = 3
@@ -276,7 +324,7 @@ def call_gemini_priority_selection(
     # 최대 3회 재시도
     for attempt in range(3):
         try:
-            res = requests.post(url, headers=headers, json=data, timeout=30)
+            res = requests.post(url, headers=headers, json=data, timeout=60)
             
             if res.status_code == 200:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
@@ -306,18 +354,18 @@ def call_gemini_priority_selection(
             else:
                 logger.error(f"   ❌ API 오류: {res.status_code} - {res.text[:200]}")
                 if res.status_code >= 500:
-                    time.sleep(5)
+                    time.sleep(10)
                     continue
                 return []
                 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"   ⚠️ [연결 불안정] {e}. 5초 후 재시도 ({attempt+1}/3)...")
-            time.sleep(5)
+            logger.warning(f"   ⚠️ [연결 불안정] {e}. 10초 후 재시도 ({attempt+1}/3)...")
+            time.sleep(10)
             continue
         except Exception as e:
             logger.error(f"   ❌ 예상치 못한 오류: {e}")
             if attempt < 2:
-                time.sleep(5)
+                time.sleep(10)
                 continue
             return []
             
