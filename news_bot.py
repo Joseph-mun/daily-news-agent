@@ -14,6 +14,7 @@ import time
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+from difflib import SequenceMatcher
 from tavily import TavilyClient
 
 # ==========================================
@@ -256,6 +257,55 @@ def simple_rule_filter(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return filtered
 
 
+def remove_duplicate_articles(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    제목 유사도 기반으로 중복 기사를 제거합니다.
+    같은 사건을 다룬 여러 언론사의 기사 중 하나만 선택합니다.
+    
+    Args:
+        articles: 중복 제거할 뉴스 기사 리스트
+    
+    Returns:
+        List[Dict]: 중복이 제거된 뉴스 기사 리스트
+    """
+    if not articles:
+        return []
+    
+    unique = []
+    
+    for article in articles:
+        title = article.get('title', '')
+        is_duplicate = False
+        
+        # 기존 unique 리스트의 기사들과 유사도 비교
+        for i, existing in enumerate(unique):
+            similarity = SequenceMatcher(
+                None,
+                title.lower(),
+                existing['title'].lower()
+            ).ratio()
+            
+            # 70% 이상 유사하면 중복으로 간주
+            if similarity > 0.70:
+                is_duplicate = True
+                # 더 긴 제목(더 상세한 기사)을 선택
+                if len(title) > len(existing['title']):
+                    unique[i] = article
+                    logger.debug(f"   🔄 중복 교체: '{existing['title'][:30]}...' → '{title[:30]}...'")
+                break
+        
+        if not is_duplicate:
+            unique.append(article)
+    
+    removed_count = len(articles) - len(unique)
+    if removed_count > 0:
+        logger.info(f"   🗑️ 중복 제거: {len(articles)}개 → {len(unique)}개 ({removed_count}개 제거)")
+    else:
+        logger.info(f"   ✅ 중복 없음: {len(articles)}개 유지")
+    
+    return unique
+
+
 # ==========================================
 # AI 선별 (Groq API) - 배치 처리 방식
 # ==========================================
@@ -297,11 +347,25 @@ def call_groq_batch_selection(
 
 제외: 홍보성, 단순 인사, 중복 내용"""
     
-    # 사용자 프롬프트 (간결한 지시)
+    # 사용자 프롬프트 (중복 제거 규칙 강화)
     user_prompt = f"""아래 기사 중에서:
 - [국내] 태그 기사 중 상위 7개
 - [해외] 태그 기사 중 상위 3개
 총 10개를 선별하고, 각 기사를 2줄로 요약해라.
+
+⚠️ **중복 제거 규칙 (매우 중요)**:
+1. 같은 사건/사고를 다룬 기사는 **반드시 1개만** 선택
+2. 제목이 비슷한 기사들 중 **가장 상세한 1개**만 선택
+3. 예시:
+   ✅ "SK쉴더스, 충전기 해킹 성공" (선택)
+   ❌ "SK쉴더스, 폰투온서 충전기 해킹" (위와 중복, 제외)
+   ❌ "전기차 충전기 해킹... SK쉴더스" (위와 중복, 제외)
+4. 다양한 사건을 다룬 기사를 선택 (한 사건에 5개 X)
+
+⚠️ **해외 기사 필수**:
+- [해외] 태그 기사를 **반드시 찾아서** 3개 선택
+- [해외] 기사가 3개 미만이면 있는 만큼만 포함
+- [해외] 기사가 없으면 국내 기사로만 10개 구성
 
 [입력 데이터]
 {json.dumps(items, ensure_ascii=False, indent=2)}
@@ -361,7 +425,18 @@ JSON 배열로만 출력:
                             result = parsed
                         
                         if result:
-                            logger.info(f"   ✅ AI 배치 선별 완료 (Groq): {len(result)}개 (요약 포함)")
+                            # 해외 기사 개수 확인
+                            overseas_count = len([a for a in result if '[해외]' in a.get('category', '')])
+                            domestic_count = len(result) - overseas_count
+                            
+                            # 해외 기사 부족 시 경고
+                            if overseas_count == 0:
+                                logger.warning("   ⚠️ 해외 기사가 선별되지 않았습니다.")
+                                logger.warning("   💡 Tavily 검색 결과 확인 또는 검색 키워드 조정 필요")
+                            elif overseas_count < 3:
+                                logger.warning(f"   ⚠️ 해외 기사 {overseas_count}개만 선별됨 (목표: 3개)")
+                            
+                            logger.info(f"   ✅ AI 배치 선별 완료 (Groq): {len(result)}개 (국내 {domestic_count}, 해외 {overseas_count})")
                             return result
                         else:
                             logger.warning(f"   ⚠️ 선별된 기사가 없음")
@@ -563,15 +638,26 @@ def process_news() -> List[Dict[str, str]]:
             en_filtered = []
             logger.warning("   ⚠️ 해외 후보 기사가 없습니다.")
         
-        # 4. 모든 후보를 합쳐서 배치 처리
+        # 4. 중복 제거 (제목 유사도 기반)
+        logger.info("\n🗑️ [2.5단계] 중복 기사 제거 중...")
         all_candidates = kr_filtered + en_filtered
         
         if not all_candidates:
             logger.warning("⚠️ 필터링 후 후보 기사가 없습니다.")
             return []
         
+        # 국내, 해외 각각 중복 제거 후 합치기
+        kr_unique = remove_duplicate_articles(kr_filtered) if kr_filtered else []
+        en_unique = remove_duplicate_articles(en_filtered) if en_filtered else []
+        all_candidates = kr_unique + en_unique
+        
+        logger.info(f"   📊 중복 제거 후: {len(all_candidates)}개 (국내 {len(kr_unique)} + 해외 {len(en_unique)})")
+        
+        if not all_candidates:
+            logger.warning("⚠️ 중복 제거 후 후보 기사가 없습니다.")
+            return []
+        
         logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별하고 요약합니다...")
-        logger.info(f"   📊 총 후보: {len(all_candidates)}개 (국내 {len(kr_filtered)} + 해외 {len(en_filtered)})")
         logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (Groq의 빠른 추론 속도)")
         
         final_list = call_groq_batch_selection(all_candidates)
