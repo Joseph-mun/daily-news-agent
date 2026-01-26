@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
 KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -257,14 +257,14 @@ def simple_rule_filter(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
 
 # ==========================================
-# AI 선별 (Gemini API) - 배치 처리 방식
+# AI 선별 (Groq API) - 배치 처리 방식
 # ==========================================
-def call_gemini_batch_selection(
+def call_groq_batch_selection(
     items: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
     """
-    Gemini API를 사용하여 국내·해외 뉴스를 한 번에 선별하고 요약합니다.
-    (API 호출 2회 → 1회로 절감)
+    Groq API를 사용하여 국내·해외 뉴스를 한 번에 선별하고 요약합니다.
+    (API 호출 2회 → 1회로 절감, Groq의 빠른 추론 속도 활용)
     
     Args:
         items: 선별할 뉴스 기사 리스트 (국내 + 해외)
@@ -275,23 +275,19 @@ def call_gemini_batch_selection(
     if not items:
         return []
     
-    if not GEMINI_KEY:
-        logger.error("❌ Gemini API 키가 없습니다.")
+    if not GROQ_API_KEY:
+        logger.error("❌ Groq API 키가 없습니다.")
         return []
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
-    headers = {'Content-Type': 'application/json'}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        'Authorization': f'Bearer {GROQ_API_KEY}',
+        'Content-Type': 'application/json'
+    }
     
-    # 간결한 프롬프트 (토큰 절약)
-    prompt = f"""
-[입력 데이터]
-{json.dumps(items, ensure_ascii=False, indent=2)}
-
-[지시사항]
-아래 기사 중에서:
-- [국내] 태그 기사 중 상위 7개
-- [해외] 태그 기사 중 상위 3개
-총 10개를 선별하고, 각 기사를 **2줄 이내로 요약**해라.
+    # 시스템 프롬프트 (역할 정의)
+    system_prompt = """너는 금융권 보안 뉴스 전문 큐레이터다.
+뉴스를 우선순위에 따라 선별하고 핵심 내용을 2줄로 요약한다.
 
 우선순위:
 1. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
@@ -299,10 +295,19 @@ def call_gemini_batch_selection(
 3. 기술/취약점 (제로데이, 새 공격기법)
 4. 신한 관련 (+가점)
 
-제외: 홍보성, 단순 인사, 중복 내용
+제외: 홍보성, 단순 인사, 중복 내용"""
+    
+    # 사용자 프롬프트 (간결한 지시)
+    user_prompt = f"""아래 기사 중에서:
+- [국내] 태그 기사 중 상위 7개
+- [해외] 태그 기사 중 상위 3개
+총 10개를 선별하고, 각 기사를 2줄로 요약해라.
+
+[입력 데이터]
+{json.dumps(items, ensure_ascii=False, indent=2)}
 
 [출력 포맷]
-반드시 아래 JSON 배열 형식으로만 출력:
+JSON 배열로만 출력:
 [
   {{
     "category": "[국내 or 해외]",
@@ -311,17 +316,18 @@ def call_gemini_batch_selection(
     "detected_date": "YYYY-MM-DD",
     "summary": "핵심 내용 2줄 요약 (각 줄 25자 내외)"
   }}
-]
-"""
+]"""
     
-    # API 설정 (출력 토큰 제한, JSON 모드)
+    # Groq API 요청 (OpenAI 호환 형식)
     data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 800,  # 출력 제한
-            "responseMimeType": "application/json"
-        }
+        "model": "llama-3.3-70b-versatile",  # Groq의 빠르고 강력한 모델
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1500,
+        "response_format": {"type": "json_object"}
     }
     
     # 최대 3회 재시도
@@ -330,23 +336,43 @@ def call_gemini_batch_selection(
             res = requests.post(url, headers=headers, json=data, timeout=60)
             
             if res.status_code == 200:
-                text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                clean_text = text.replace("```json", "").replace("```", "").strip()
+                response_data = res.json()
                 
-                try:
-                    # JSON 추출
-                    start = clean_text.find('[')
-                    end = clean_text.rfind(']') + 1
-                    if start >= 0 and end > start:
-                        result = json.loads(clean_text[start:end])
-                        logger.info(f"   ✅ AI 배치 선별 완료: {len(result)}개 (요약 포함)")
-                        return result
-                    else:
-                        logger.warning(f"   ⚠️ JSON 구조를 찾을 수 없음")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"   ⚠️ JSON 파싱 실패: {e}")
-                    if attempt < 2:
-                        continue
+                # Groq 응답에서 텍스트 추출
+                if 'choices' in response_data and len(response_data['choices']) > 0:
+                    content = response_data['choices'][0]['message']['content']
+                    clean_text = content.replace("```json", "").replace("```", "").strip()
+                    
+                    try:
+                        # JSON 파싱 (배열 또는 객체)
+                        parsed = json.loads(clean_text)
+                        
+                        # 배열이 아니라 객체로 감싸진 경우 처리
+                        if isinstance(parsed, dict):
+                            # {"articles": [...]} 형식일 경우
+                            for key in ['articles', 'results', 'data', 'items']:
+                                if key in parsed and isinstance(parsed[key], list):
+                                    result = parsed[key]
+                                    break
+                            else:
+                                logger.warning(f"   ⚠️ JSON 객체에서 배열을 찾을 수 없음")
+                                result = []
+                        else:
+                            result = parsed
+                        
+                        if result:
+                            logger.info(f"   ✅ AI 배치 선별 완료 (Groq): {len(result)}개 (요약 포함)")
+                            return result
+                        else:
+                            logger.warning(f"   ⚠️ 선별된 기사가 없음")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"   ⚠️ JSON 파싱 실패: {e}")
+                        logger.debug(f"   응답 내용: {clean_text[:200]}")
+                        if attempt < 2:
+                            continue
+                        return []
+                else:
+                    logger.warning(f"   ⚠️ 응답 형식 오류")
                     return []
                     
             elif res.status_code == 429:
@@ -377,31 +403,9 @@ def call_gemini_batch_selection(
 
 
 # ==========================================
-# AI 선별 (Gemini API) - 기존 함수 (하위 호환성 유지)
+# [구 버전] Gemini 함수는 제거됨
+# 현재는 Groq API (call_groq_batch_selection) 사용
 # ==========================================
-def call_gemini_priority_selection(
-    items: List[Dict[str, str]],
-    mode: str
-) -> List[Dict[str, str]]:
-    """
-    Gemini API를 사용하여 뉴스 기사를 우선순위에 따라 선별합니다.
-    
-    Args:
-        items: 선별할 뉴스 기사 리스트
-        mode: 'KR' (국내) 또는 'GLOBAL' (해외)
-    
-    Returns:
-        List[Dict]: 선별된 뉴스 기사 리스트
-    """
-    if not items:
-        return []
-    
-    if not GEMINI_KEY:
-        logger.error("❌ Gemini API 키가 없습니다.")
-        return []
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
-    headers = {'Content-Type': 'application/json'}
     
     if mode == 'KR':
         target_count = 7
@@ -568,9 +572,9 @@ def process_news() -> List[Dict[str, str]]:
         
         logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별하고 요약합니다...")
         logger.info(f"   📊 총 후보: {len(all_candidates)}개 (국내 {len(kr_filtered)} + 해외 {len(en_filtered)})")
-        logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (기존 대비 50% 절감)")
+        logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (Groq의 빠른 추론 속도)")
         
-        final_list = call_gemini_batch_selection(all_candidates)
+        final_list = call_groq_batch_selection(all_candidates)
         
         if final_list:
             logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료 (요약 포함)")
