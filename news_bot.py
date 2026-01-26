@@ -224,7 +224,160 @@ def search_tavily_news() -> List[Dict[str, str]]:
 
 
 # ==========================================
-# AI 선별 (Gemini API)
+# 로컬 필터링 (API 사용량 절감)
+# ==========================================
+def simple_rule_filter(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    명백한 제외 대상을 로컬에서 필터링하여 API 사용량을 줄입니다.
+    
+    Args:
+        articles: 필터링할 뉴스 기사 리스트
+    
+    Returns:
+        List[Dict]: 필터링된 뉴스 기사 리스트
+    """
+    if not articles:
+        return []
+    
+    filtered = []
+    exclude_keywords = ['채용', '인사발령', '이벤트', '프로모션', '광고', '모집']
+    
+    for article in articles:
+        title = article.get('title', '').lower()
+        desc = article.get('description', '').lower()
+        
+        # 명백히 관련 없는 것만 제외
+        if any(kw in title or kw in desc for kw in exclude_keywords):
+            continue
+        
+        filtered.append(article)
+    
+    logger.info(f"   🔍 로컬 필터링: {len(articles)}개 → {len(filtered)}개")
+    return filtered
+
+
+# ==========================================
+# AI 선별 (Gemini API) - 배치 처리 방식
+# ==========================================
+def call_gemini_batch_selection(
+    items: List[Dict[str, str]]
+) -> List[Dict[str, str]]:
+    """
+    Gemini API를 사용하여 국내·해외 뉴스를 한 번에 선별하고 요약합니다.
+    (API 호출 2회 → 1회로 절감)
+    
+    Args:
+        items: 선별할 뉴스 기사 리스트 (국내 + 해외)
+    
+    Returns:
+        List[Dict]: 선별된 뉴스 기사 리스트 (요약 포함)
+    """
+    if not items:
+        return []
+    
+    if not GEMINI_KEY:
+        logger.error("❌ Gemini API 키가 없습니다.")
+        return []
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    
+    # 간결한 프롬프트 (토큰 절약)
+    prompt = f"""
+[입력 데이터]
+{json.dumps(items, ensure_ascii=False, indent=2)}
+
+[지시사항]
+아래 기사 중에서:
+- [국내] 태그 기사 중 상위 7개
+- [해외] 태그 기사 중 상위 3개
+총 10개를 선별하고, 각 기사를 **2줄 이내로 요약**해라.
+
+우선순위:
+1. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
+2. 규제/정책 (금융당국·보안원 발표, 법규 개정)
+3. 기술/취약점 (제로데이, 새 공격기법)
+4. 신한 관련 (+가점)
+
+제외: 홍보성, 단순 인사, 중복 내용
+
+[출력 포맷]
+반드시 아래 JSON 배열 형식으로만 출력:
+[
+  {{
+    "category": "[국내 or 해외]",
+    "title": "제목 (원문 그대로)",
+    "url": "링크",
+    "detected_date": "YYYY-MM-DD",
+    "summary": "핵심 내용 2줄 요약 (각 줄 25자 내외)"
+  }}
+]
+"""
+    
+    # API 설정 (출력 토큰 제한, JSON 모드)
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 800,  # 출력 제한
+            "responseMimeType": "application/json"
+        }
+    }
+    
+    # 최대 3회 재시도
+    for attempt in range(3):
+        try:
+            res = requests.post(url, headers=headers, json=data, timeout=60)
+            
+            if res.status_code == 200:
+                text = res.json()['candidates'][0]['content']['parts'][0]['text']
+                clean_text = text.replace("```json", "").replace("```", "").strip()
+                
+                try:
+                    # JSON 추출
+                    start = clean_text.find('[')
+                    end = clean_text.rfind(']') + 1
+                    if start >= 0 and end > start:
+                        result = json.loads(clean_text[start:end])
+                        logger.info(f"   ✅ AI 배치 선별 완료: {len(result)}개 (요약 포함)")
+                        return result
+                    else:
+                        logger.warning(f"   ⚠️ JSON 구조를 찾을 수 없음")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"   ⚠️ JSON 파싱 실패: {e}")
+                    if attempt < 2:
+                        continue
+                    return []
+                    
+            elif res.status_code == 429:
+                wait_time = (attempt + 1) * 10
+                logger.warning(f"   ⏳ [API 과부하] {wait_time}초 대기 후 재시도...")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"   ❌ API 오류: {res.status_code} - {res.text[:200]}")
+                if res.status_code >= 500:
+                    time.sleep(10)
+                    continue
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"   ⚠️ [연결 불안정] {e}. 10초 후 재시도 ({attempt+1}/3)...")
+            time.sleep(10)
+            continue
+        except Exception as e:
+            logger.error(f"   ❌ 예상치 못한 오류: {e}")
+            if attempt < 2:
+                time.sleep(10)
+                continue
+            return []
+            
+    logger.error(f"   ❌ 3회 재시도 실패")
+    return []
+
+
+# ==========================================
+# AI 선별 (Gemini API) - 기존 함수 (하위 호환성 유지)
 # ==========================================
 def call_gemini_priority_selection(
     items: List[Dict[str, str]],
@@ -374,48 +527,61 @@ def call_gemini_priority_selection(
 
 
 # ==========================================
-# 뉴스 처리 메인 함수
+# 뉴스 처리 메인 함수 (배치 처리 최적화)
 # ==========================================
 def process_news() -> List[Dict[str, str]]:
     """
     국내 및 해외 뉴스를 수집하고 AI로 선별합니다.
+    (배치 처리: API 호출 2회 → 1회로 절감)
     
     Returns:
-        List[Dict]: 최종 선별된 뉴스 기사 리스트
+        List[Dict]: 최종 선별된 뉴스 기사 리스트 (요약 포함)
     """
-    final_list = []
-    
-    # 1. 국내 뉴스 수집 및 선별
     try:
+        # 1. 국내 뉴스 수집
+        logger.info("\n📰 [1단계] 뉴스 수집 중...")
         kr_candidates = search_naver_news()
         
-        if kr_candidates:
-            logger.info("\n🤖 [국내] AI가 중요 뉴스 7개를 선별합니다 (오타 방지 모드)...")
-            kr_selected = call_gemini_priority_selection(kr_candidates, 'KR')
-            final_list.extend(kr_selected)
-            logger.info(f"   ✅ 국내 {len(kr_selected)}개 선별 완료")
-        else:
-            logger.warning("   ⚠️ 국내 후보 기사가 없습니다.")
-    except Exception as e:
-        logger.error(f"국내 뉴스 처리 중 오류: {e}")
-        
-    time.sleep(3)  # API 레이트 리밋 방지
-    
-    # 2. 해외 뉴스 수집 및 선별
-    try:
+        # 2. 해외 뉴스 수집
         en_candidates = search_tavily_news()
         
-        if en_candidates:
-            logger.info("\n🤖 [해외] AI가 중요 기사 3개를 선별하고 번역합니다...")
-            en_selected = call_gemini_priority_selection(en_candidates, 'GLOBAL')
-            final_list.extend(en_selected)
-            logger.info(f"   ✅ 해외 {len(en_selected)}개 선별 완료")
+        # 3. 로컬 필터링 (명백한 제외 대상 사전 제거)
+        logger.info("\n🔍 [2단계] 로컬 필터링 중...")
+        if kr_candidates:
+            kr_filtered = simple_rule_filter(kr_candidates)
         else:
-            logger.warning("   ⚠️ 해외 후보 기사가 없습니다.")
-    except Exception as e:
-        logger.error(f"해외 뉴스 처리 중 오류: {e}")
+            kr_filtered = []
+            logger.warning("   ⚠️ 국내 후보 기사가 없습니다.")
         
-    return final_list
+        if en_candidates:
+            en_filtered = simple_rule_filter(en_candidates)
+        else:
+            en_filtered = []
+            logger.warning("   ⚠️ 해외 후보 기사가 없습니다.")
+        
+        # 4. 모든 후보를 합쳐서 배치 처리
+        all_candidates = kr_filtered + en_filtered
+        
+        if not all_candidates:
+            logger.warning("⚠️ 필터링 후 후보 기사가 없습니다.")
+            return []
+        
+        logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별하고 요약합니다...")
+        logger.info(f"   📊 총 후보: {len(all_candidates)}개 (국내 {len(kr_filtered)} + 해외 {len(en_filtered)})")
+        logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (기존 대비 50% 절감)")
+        
+        final_list = call_gemini_batch_selection(all_candidates)
+        
+        if final_list:
+            logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료 (요약 포함)")
+        else:
+            logger.warning("   ⚠️ AI 선별 실패")
+        
+        return final_list
+        
+    except Exception as e:
+        logger.error(f"❌ 뉴스 처리 중 오류: {e}")
+        return []
 
 
 # ==========================================
@@ -472,12 +638,17 @@ def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
         logger.error("❌ 액세스 토큰을 가져올 수 없습니다.")
         return False
 
-    # 메시지 구성
+    # 메시지 구성 (요약 포함)
     message_text = f"🛡️ {TODAY_STR} 보안 브리핑\n\n"
     
     for i, item in enumerate(articles, 1):
         message_text += f"{i}. {item.get('category', '')} {item.get('title', '')}\n"
-        message_text += f"{item.get('url', '')}\n\n"
+        
+        # 요약 추가
+        if 'summary' in item and item['summary']:
+            message_text += f"   💬 {item['summary']}\n"
+        
+        message_text += f"   🔗 {item.get('url', '')}\n\n"
     
     message_text += "끝."
 
@@ -550,7 +721,7 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
                    .replace('<', '&lt;')
                    .replace('>', '&gt;'))
     
-    # 텔레그램 메시지 구성 (4096자 제한 고려)
+    # 텔레그램 메시지 구성 (4096자 제한 고려, 요약 포함)
     message_text = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
     
     for i, item in enumerate(articles, 1):
@@ -559,7 +730,13 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         category = escape_html(item.get('category', ''))
         
         message_text += f"{i}. {category} <b>{title}</b>\n"
-        message_text += f"<a href=\"{url}\">{url}</a>\n\n"
+        
+        # 요약 추가
+        if 'summary' in item and item['summary']:
+            summary = escape_html(item['summary'])
+            message_text += f"   💬 <i>{summary}</i>\n"
+        
+        message_text += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
     
     message_text += "<i>끝.</i>"
     
@@ -575,7 +752,14 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
             url = item.get('url', '')
             category = escape_html(item.get('category', ''))
             
-            new_line = f"{i}. {category} <b>{title}</b>\n<a href=\"{url}\">{url}</a>\n\n"
+            new_line = f"{i}. {category} <b>{title}</b>\n"
+            
+            # 요약 추가
+            if 'summary' in item and item['summary']:
+                summary = escape_html(item['summary'])
+                new_line += f"   💬 <i>{summary}</i>\n"
+            
+            new_line += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
             
             if len(current_message) + len(new_line) > max_length - 50:  # 여유 공간 확보
                 messages.append(current_message + "<i>계속...</i>")
