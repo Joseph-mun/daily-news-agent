@@ -339,6 +339,22 @@ def call_groq_batch_selection(
     system_prompt = """너는 금융권 보안 뉴스 전문 큐레이터다.
 뉴스를 우선순위에 따라 선별하고 핵심 내용을 2줄로 요약한다.
 
+⚠️ **요약 작성 규칙**:
+1. 제목과 다른 표현으로 작성 (제목 반복 금지)
+2. 구체적 정보 포함: 누가, 언제, 어떻게, 피해 규모, 대응 방안
+3. 배경이나 영향까지 서술
+
+[좋은 예시]
+제목: "NH농협은행, 랜섬웨어 공격 받아"
+❌ 나쁜 요약: "NH농협은행이 랜섬웨어 공격을 받았음"
+✅ 좋은 요약: "새벽 2시 해외 IP에서 VPN 취약점 공격
+              고객정보 암호화, 일부 지점 업무 중단"
+
+제목: "금융보안원, AI 보안 가이드라인 발표"
+❌ 나쁜 요약: "금융보안원이 AI 보안 가이드라인을 발표"
+✅ 좋은 요약: "생성형 AI 활용 시 데이터 유출 방지 조치 의무화
+              내년 3월까지 전 금융권 적용 예정"
+
 우선순위:
 1. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
 2. 규제/정책 (금융당국·보안원 발표, 법규 개정)
@@ -375,12 +391,19 @@ JSON 배열로만 출력:
 [
   {{
     "category": "[국내 or 해외]",
-    "title": "제목 (원문 그대로)",
+    "title": "제목 (해외 기사는 한글로 번역)",
+    "title_original": "원문 제목 (해외 기사만, 국내는 생략)",
     "url": "링크",
     "detected_date": "YYYY-MM-DD",
-    "summary": "핵심 내용 2줄 요약 (각 줄 25자 내외)"
+    "summary": "핵심 내용 2줄 요약 (제목과 다른 표현, 구체적 정보 포함)"
   }}
-]"""
+]
+
+⚠️ **해외 기사 번역 규칙**:
+- [해외] 기사의 title은 **반드시 한글로 번역**
+- title_original에 영어 원문 보관
+- 번역은 자연스럽고 이해하기 쉽게 (직역X, 의역O)
+- 국내 기사는 title_original 필드 생략"""
     
     # Groq API 요청 (OpenAI 호환 형식)
     data = {
@@ -734,6 +757,10 @@ def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
     for i, item in enumerate(articles, 1):
         message_text += f"{i}. {item.get('category', '')} {item.get('title', '')}\n"
         
+        # 해외 기사 원문 표시
+        if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
+            message_text += f"   🌐 {item['title_original']}\n"
+        
         # 요약 추가
         if 'summary' in item and item['summary']:
             message_text += f"   💬 {item['summary']}\n"
@@ -820,6 +847,11 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         category = escape_html(item.get('category', ''))
         
         message_text += f"{i}. {category} <b>{title}</b>\n"
+        
+        # 해외 기사 원문 표시
+        if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
+            title_original = escape_html(item['title_original'])
+            message_text += f"   🌐 <i>{title_original}</i>\n"
         
         # 요약 추가
         if 'summary' in item and item['summary']:
