@@ -6,9 +6,10 @@
 
 - 🇰🇷 **국내 뉴스 수집**: 네이버 뉴스 API를 통해 정보보호, 해킹, 개인정보유출, 금융보안, 랜섬웨어 관련 뉴스 수집
 - 🇺🇸 **해외 뉴스 수집**: Tavily API를 통해 글로벌 보안 뉴스 수집
-- 🤖 **AI 선별**: Google Gemini API를 사용하여 중요 뉴스만 선별 (국내 7개, 해외 3개)
-- 📱 **카카오톡 전송**: 선별된 뉴스를 카카오톡으로 자동 전송
-- ⏰ **자동 실행**: GitHub Actions를 통해 매일 아침 8시 자동 실행
+- 🤖 **AI 선별 및 요약**: Groq API (Llama 3.3 70B)를 사용하여 중요 뉴스 선별 + 2줄 요약 (국내 7개, 해외 3개)
+- 📱 **카카오톡/텔레그램 전송**: 선별된 뉴스를 요약과 함께 자동 전송
+- ⏰ **자동 실행**: GitHub Actions를 통해 매일 아침 자동 실행
+- ⚡ **배치 처리**: API 호출 횟수 50% 절감 (2회 → 1회)
 
 ## 프로젝트 구조
 
@@ -36,9 +37,11 @@ dailynewsbot/
 1. [Tavily](https://tavily.com/) 접속
 2. 회원가입 후 API 키 발급
 
-#### Google Gemini API
-1. [Google AI Studio](https://makersuite.google.com/app/apikey) 접속
-2. API 키 생성
+#### Groq API
+1. [Groq Console](https://console.groq.com/) 접속
+2. 회원가입 후 API 키 생성
+3. 무료 플랜: 분당 30회, 일일 14,400회 (매우 넉넉함)
+4. 빠른 추론 속도 (Gemini 대비 5-10배 빠름)
 
 #### 카카오톡 API
 1. [카카오 개발자 센터](https://developers.kakao.com/) 접속
@@ -59,9 +62,11 @@ GitHub 저장소에서 다음 Secrets를 설정해야 합니다:
    - `NAVER_CLIENT_ID`: 네이버 Client ID
    - `NAVER_CLIENT_SECRET`: 네이버 Client Secret
    - `TAVILY_API_KEY`: Tavily API 키
-   - `GEMINI_API_KEY`: Gemini API 키
+   - `GROQ_API_KEY`: Groq API 키
    - `KAKAO_CLIENT_ID`: 카카오 Client ID
    - `KAKAO_REFRESH_TOKEN`: 카카오 Refresh Token
+   - `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰 (선택)
+   - `TELEGRAM_CHAT_ID`: 텔레그램 채팅 ID (선택)
 
 ### 3. 로컬 테스트 (선택사항)
 
@@ -132,9 +137,10 @@ schedule:
 3. API 권한 설정 확인
 
 ### AI 선별이 제대로 안 되는 경우
-1. Gemini API 키 확인
-2. API 할당량 확인
+1. Groq API 키 확인
+2. API 할당량 확인 (무료: 분당 30회, 일 14,400회)
 3. 로그에서 JSON 파싱 에러 확인
+4. Groq는 매우 빠르므로 네트워크 문제가 없다면 대부분 잘 작동합니다
 
 ## 라이선스
 
