@@ -259,7 +259,7 @@ def simple_rule_filter(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
 def remove_duplicate_articles(articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
-    제목 유사도 기반으로 중복 기사를 제거합니다.
+    제목 유사도 + 핵심 키워드 기반으로 중복 기사를 제거합니다.
     같은 사건을 다룬 여러 언론사의 기사 중 하나만 선택합니다.
     
     Args:
@@ -271,27 +271,50 @@ def remove_duplicate_articles(articles: List[Dict[str, str]]) -> List[Dict[str, 
     if not articles:
         return []
     
+    def extract_keywords(title: str) -> set:
+        """제목에서 핵심 키워드 추출 (회사명, 사건명 등)"""
+        # 공백, 특수문자 기준으로 단어 분리
+        words = re.findall(r'[가-힣a-zA-Z0-9]+', title)
+        # 3글자 이상 단어만 키워드로 간주
+        keywords = {w.lower() for w in words if len(w) >= 3}
+        return keywords
+    
     unique = []
     
     for article in articles:
         title = article.get('title', '')
         is_duplicate = False
         
-        # 기존 unique 리스트의 기사들과 유사도 비교
+        # 현재 기사의 키워드 추출
+        current_keywords = extract_keywords(title)
+        
+        # 기존 unique 리스트의 기사들과 비교
         for i, existing in enumerate(unique):
+            existing_title = existing['title']
+            existing_keywords = extract_keywords(existing_title)
+            
+            # 1. 제목 유사도 체크 (60% 이상 → 중복)
             similarity = SequenceMatcher(
                 None,
                 title.lower(),
-                existing['title'].lower()
+                existing_title.lower()
             ).ratio()
             
-            # 70% 이상 유사하면 중복으로 간주
-            if similarity > 0.70:
+            # 2. 키워드 중복률 체크 (공통 키워드가 50% 이상 → 중복)
+            if current_keywords and existing_keywords:
+                common_keywords = current_keywords & existing_keywords
+                keyword_overlap = len(common_keywords) / min(len(current_keywords), len(existing_keywords))
+            else:
+                keyword_overlap = 0
+            
+            # 유사도 60% 이상 OR 키워드 중복 50% 이상 → 중복으로 간주
+            if similarity > 0.60 or keyword_overlap > 0.50:
                 is_duplicate = True
                 # 더 긴 제목(더 상세한 기사)을 선택
-                if len(title) > len(existing['title']):
+                if len(title) > len(existing_title):
                     unique[i] = article
-                    logger.debug(f"   🔄 중복 교체: '{existing['title'][:30]}...' → '{title[:30]}...'")
+                    logger.debug(f"   🔄 중복 교체 (유사도:{similarity:.0%}, 키워드:{keyword_overlap:.0%})")
+                    logger.debug(f"      '{existing_title[:30]}...' → '{title[:30]}...'")
                 break
         
         if not is_duplicate:
@@ -313,14 +336,14 @@ def call_groq_batch_selection(
     items: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
     """
-    Groq API를 사용하여 국내·해외 뉴스를 한 번에 선별하고 요약합니다.
+    Groq API를 사용하여 국내·해외 뉴스를 한 번에 선별합니다.
     (API 호출 2회 → 1회로 절감, Groq의 빠른 추론 속도 활용)
     
     Args:
         items: 선별할 뉴스 기사 리스트 (국내 + 해외)
     
     Returns:
-        List[Dict]: 선별된 뉴스 기사 리스트 (요약 포함)
+        List[Dict]: 선별된 뉴스 기사 리스트
     """
     if not items:
         return []
@@ -337,23 +360,7 @@ def call_groq_batch_selection(
     
     # 시스템 프롬프트 (역할 정의)
     system_prompt = """너는 금융권 보안 뉴스 전문 큐레이터다.
-뉴스를 우선순위에 따라 선별하고 핵심 내용을 띄어쓰기 포함 50자 이내로 요약.
-
-⚠️ **요약 작성 규칙**:
-1. 제목과 다른 표현으로 작성 (제목 반복 금지)
-2. 구체적 정보 포함: 누가, 언제, 어떻게, 피해 규모, 대응 방안
-3. 배경이나 영향까지 서술
-
-[좋은 예시]
-제목: "NH농협은행, 랜섬웨어 공격 받아"
-❌ 나쁜 요약: "NH농협은행이 랜섬웨어 공격을 받았음"
-✅ 좋은 요약: "새벽 2시 해외 IP에서 VPN 취약점 공격
-              고객정보 암호화, 일부 지점 업무 중단"
-
-제목: "금융보안원, AI 보안 가이드라인 발표"
-❌ 나쁜 요약: "금융보안원이 AI 보안 가이드라인을 발표"
-✅ 좋은 요약: "생성형 AI 활용 시 데이터 유출 방지 조치 의무화
-              내년 3월까지 전 금융권 적용 예정"
+뉴스를 우선순위에 따라 선별한다.
 
 우선순위:
 1. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
@@ -367,7 +374,7 @@ def call_groq_batch_selection(
     user_prompt = f"""아래 기사 중에서:
 - [국내] 태그 기사 중 상위 7개
 - [해외] 태그 기사 중 상위 3개
-총 10개를 선별하고, 각 기사를 띄어쓰기 포함 50자 이내로 요약해라.
+총 10개를 선별해라.
 
 ⚠️ **중복 제거 규칙 (매우 중요)**:
 1. 같은 사건/사고를 다룬 기사는 **반드시 1개만** 선택
@@ -394,8 +401,7 @@ JSON 배열로만 출력:
     "title": "제목 (해외 기사는 한글로 번역)",
     "title_original": "원문 제목 (해외 기사만, 국내는 생략)",
     "url": "링크",
-    "detected_date": "YYYY-MM-DD",
-    "summary": "핵심 내용 2줄 요약 (제목과 다른 표현, 구체적 정보 포함)"
+    "detected_date": "YYYY-MM-DD"
   }}
 ]
 
@@ -637,7 +643,7 @@ def process_news() -> List[Dict[str, str]]:
     (배치 처리: API 호출 2회 → 1회로 절감)
     
     Returns:
-        List[Dict]: 최종 선별된 뉴스 기사 리스트 (요약 포함)
+        List[Dict]: 최종 선별된 뉴스 기사 리스트
     """
     try:
         # 1. 국내 뉴스 수집
@@ -680,13 +686,13 @@ def process_news() -> List[Dict[str, str]]:
             logger.warning("⚠️ 중복 제거 후 후보 기사가 없습니다.")
             return []
         
-        logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별하고 요약합니다...")
+        logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별합니다...")
         logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (Groq의 빠른 추론 속도)")
         
         final_list = call_groq_batch_selection(all_candidates)
         
         if final_list:
-            logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료 (요약 포함)")
+            logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료")
         else:
             logger.warning("   ⚠️ AI 선별 실패")
         
@@ -751,7 +757,7 @@ def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
         logger.error("❌ 액세스 토큰을 가져올 수 없습니다.")
         return False
 
-    # 메시지 구성 (요약 포함)
+    # 메시지 구성
     message_text = f"🛡️ {TODAY_STR} 보안 브리핑\n\n"
     
     for i, item in enumerate(articles, 1):
@@ -760,10 +766,6 @@ def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
         # 해외 기사 원문 표시
         if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
             message_text += f"   🌐 {item['title_original']}\n"
-        
-        # 요약 추가
-        if 'summary' in item and item['summary']:
-            message_text += f"   💬 {item['summary']}\n"
         
         message_text += f"   🔗 {item.get('url', '')}\n\n"
     
@@ -838,7 +840,7 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
                    .replace('<', '&lt;')
                    .replace('>', '&gt;'))
     
-    # 텔레그램 메시지 구성 (4096자 제한 고려, 요약 포함)
+    # 텔레그램 메시지 구성 (4096자 제한 고려)
     message_text = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
     
     for i, item in enumerate(articles, 1):
@@ -852,11 +854,6 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
             title_original = escape_html(item['title_original'])
             message_text += f"   🌐 <i>{title_original}</i>\n"
-        
-        # 요약 추가
-        if 'summary' in item and item['summary']:
-            summary = escape_html(item['summary'])
-            message_text += f"   💬 <i>{summary}</i>\n"
         
         message_text += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
     
@@ -876,10 +873,10 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
             
             new_line = f"{i}. {category} <b>{title}</b>\n"
             
-            # 요약 추가
-            if 'summary' in item and item['summary']:
-                summary = escape_html(item['summary'])
-                new_line += f"   💬 <i>{summary}</i>\n"
+            # 해외 기사 원문 표시
+            if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
+                title_original = escape_html(item['title_original'])
+                new_line += f"   🌐 <i>{title_original}</i>\n"
             
             new_line += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
             
