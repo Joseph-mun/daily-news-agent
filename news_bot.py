@@ -56,7 +56,7 @@ def search_naver_news() -> List[Dict[str, str]]:
     Returns:
         List[Dict]: 수집된 뉴스 기사 리스트
     """
-    keywords = ["정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어"]
+    keywords = ["AI보안", "정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어"]
     logger.info(f"🇰🇷 [국내] 네이버 분할 검색 시작: {keywords}")
     
     if not NAVER_ID or not NAVER_SECRET:
@@ -133,8 +133,8 @@ def search_naver_news() -> List[Dict[str, str]]:
         title = article['title'].lower()
         desc = article['description'].lower()
         
-        # 1순위 키워드 (침해사고) - 10점
-        high_priority = ['해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
+        # 1순위 키워드 (AI보안, 침해사고) - 10점
+        high_priority = ['AI보안', '해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
         score += sum(10 for k in high_priority if k in title or k in desc)
         
         # 2순위 키워드 (제도/기술) - 5점
@@ -363,10 +363,11 @@ def call_groq_batch_selection(
 뉴스를 우선순위에 따라 선별한다.
 
 우선순위:
-1. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
-2. 규제/정책 (금융당국·보안원 발표, 법규 개정)
-3. 기술/취약점 (제로데이, 새 공격기법)
-4. 신한 관련 (+가점)
+1. AI보안 (AI 보안 관련 뉴스) - 최우선
+2. 침해사고 (해킹/유출/랜섬웨어/사이버공격) - 최우선
+3. 규제/정책 (금융당국·보안원 발표, 법규 개정)
+4. 기술/취약점 (제로데이, 새 공격기법)
+5. 신한 관련 (+가점)
 
 제외: 홍보성, 단순 인사, 중복 내용"""
     
