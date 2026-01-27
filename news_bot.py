@@ -1,9 +1,9 @@
 """
-금융권 보안 뉴스 수집 및 카카오톡/텔레그램 전송 봇
+금융권 보안 뉴스 수집 및 텔레그램 전송 봇
 
 이 스크립트는 네이버 뉴스 API와 Tavily API를 사용하여
-금융권 보안 관련 뉴스를 수집하고, Gemini AI로 선별한 후
-카카오톡과 텔레그램으로 전송합니다.
+금융권 보안 관련 뉴스를 수집하고, Groq AI로 선별한 후
+텔레그램으로 전송합니다.
 """
 
 import os
@@ -34,8 +34,6 @@ NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID")
-KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -705,101 +703,6 @@ def process_news() -> List[Dict[str, str]]:
 
 
 # ==========================================
-# 카카오톡 전송
-# ==========================================
-def get_kakao_access_token() -> Optional[str]:
-    """
-    카카오 API를 사용하여 액세스 토큰을 갱신합니다.
-    
-    Returns:
-        Optional[str]: 액세스 토큰 또는 None
-    """
-    if not KAKAO_CLIENT_ID or not KAKAO_REFRESH_TOKEN:
-        logger.error("❌ 카카오 API 키가 없습니다.")
-        return None
-        
-    url = "https://kauth.kakao.com/oauth/token"
-    data = {
-        "grant_type": "refresh_token",
-        "client_id": KAKAO_CLIENT_ID,
-        "refresh_token": KAKAO_REFRESH_TOKEN
-    }
-    
-    try:
-        res = requests.post(url, data=data, timeout=10)
-        if res.status_code == 200:
-            return res.json().get("access_token")
-        else:
-            logger.error(f"❌ 토큰 갱신 실패: {res.status_code} - {res.text[:200]}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ 토큰 갱신 중 오류: {e}")
-        return None
-
-
-def send_kakaotalk(articles: List[Dict[str, str]]) -> bool:
-    """
-    선별된 뉴스 기사를 카카오톡으로 전송합니다.
-    
-    Args:
-        articles: 전송할 뉴스 기사 리스트
-    
-    Returns:
-        bool: 전송 성공 여부
-    """
-    if not articles:
-        logger.warning("⚠️ 전송할 기사가 없습니다.")
-        return False
-
-    logger.info("\n🚀 카카오톡 전송 중...")
-    access_token = get_kakao_access_token()
-    
-    if not access_token:
-        logger.error("❌ 액세스 토큰을 가져올 수 없습니다.")
-        return False
-
-    # 메시지 구성
-    message_text = f"🛡️ {TODAY_STR} 보안 브리핑\n\n"
-    
-    for i, item in enumerate(articles, 1):
-        message_text += f"{i}. {item.get('category', '')} {item.get('title', '')}\n"
-        
-        # 해외 기사 원문 표시
-        if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
-            message_text += f"   🌐 {item['title_original']}\n"
-        
-        message_text += f"   🔗 {item.get('url', '')}\n\n"
-    
-    message_text += "끝."
-
-    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    data = {
-        "template_object": json.dumps({
-            "object_type": "text",
-            "text": message_text,
-            "link": {
-                "web_url": "https://m.naver.com",
-                "mobile_web_url": "https://m.naver.com"
-            },
-            "button_title": "뉴스 더보기"
-        }, ensure_ascii=False)
-    }
-    
-    try:
-        res = requests.post(url, headers=headers, data=data, timeout=10)
-        if res.status_code == 200:
-            logger.info("✅ 카카오톡 전송 완료")
-            return True
-        else:
-            logger.error(f"❌ 전송 실패: {res.status_code} - {res.text[:200]}")
-            return False
-    except Exception as e:
-        logger.error(f"❌ 전송 중 오류: {e}")
-        return False
-
-
-# ==========================================
 # 텔레그램 전송
 # ==========================================
 def send_telegram(articles: List[Dict[str, str]]) -> bool:
@@ -962,7 +865,6 @@ def main():
         
         if final_news:
             logger.info(f"\n📊 최종 선별된 뉴스: {len(final_news)}개")
-            send_kakaotalk(final_news)
             send_telegram(final_news)
         else:
             logger.warning("⚠️ 최종 선별된 뉴스가 없습니다.")
