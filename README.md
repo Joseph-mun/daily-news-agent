@@ -7,7 +7,7 @@
 - 🇰🇷 **국내 뉴스 수집**: 네이버 뉴스 API를 통해 AI보안, 정보보호, 해킹, 개인정보유출, 금융보안, 랜섬웨어 관련 뉴스 수집 (AI보안 최우선)
 - 🇺🇸 **해외 뉴스 수집**: Tavily API를 통해 글로벌 보안 뉴스 수집
 - 🤖 **AI 선별 및 요약**: Groq API (Llama 3.3 70B)를 사용하여 중요 뉴스 선별 + 2줄 요약 (국내 7개, 해외 3개)
-- 📱 **카카오톡/텔레그램 전송**: 선별된 뉴스를 요약과 함께 자동 전송
+- 📱 **텔레그램 전송**: 선별된 뉴스를 요약과 함께 자동 전송
 - ⏰ **자동 실행**: GitHub Actions를 통해 매일 아침 자동 실행
 - ⚡ **배치 처리**: API 호출 횟수 50% 절감 (2회 → 1회)
 
@@ -43,13 +43,11 @@ dailynewsbot/
 3. 무료 플랜: 분당 30회, 일일 14,400회 (매우 넉넉함)
 4. 빠른 추론 속도 (Gemini 대비 5-10배 빠름)
 
-#### 카카오톡 API
-1. [카카오 개발자 센터](https://developers.kakao.com/) 접속
-2. 애플리케이션 등록
-3. Client ID 발급
-4. 카카오 로그인 설정 후 Refresh Token 발급
-   - 리다이렉트 URI 설정 필요
-   - 카카오 로그인 후 Refresh Token 획득
+#### 텔레그램 봇 (선택사항)
+1. 텔레그램에서 @BotFather 검색
+2. `/newbot` 명령으로 봇 생성
+3. 봇 토큰 발급
+4. 봇에게 메시지를 보내거나 그룹에 추가한 후 채팅 ID 확인
 
 ### 2. GitHub Secrets 설정
 
@@ -63,10 +61,8 @@ GitHub 저장소에서 다음 Secrets를 설정해야 합니다:
    - `NAVER_CLIENT_SECRET`: 네이버 Client Secret
    - `TAVILY_API_KEY`: Tavily API 키
    - `GROQ_API_KEY`: Groq API 키
-   - `KAKAO_CLIENT_ID`: 카카오 Client ID
-   - `KAKAO_REFRESH_TOKEN`: 카카오 Refresh Token
-   - `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰 (선택)
-   - `TELEGRAM_CHAT_ID`: 텔레그램 채팅 ID (선택)
+   - `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰
+   - `TELEGRAM_CHAT_ID`: 텔레그램 채팅 ID
 
 ### 3. 로컬 테스트 (선택사항)
 
@@ -141,10 +137,10 @@ schedule:
 2. GitHub Actions 로그 확인: **Actions** 탭 → 최근 워크플로우 실행 클릭
 3. 네이버 API 할당량 확인 (일일 제한 있음)
 
-### 카카오톡 전송이 안 되는 경우
-1. Refresh Token이 만료되었는지 확인
-2. 카카오톡 메시지 템플릿 설정 확인
-3. API 권한 설정 확인
+### 텔레그램 전송이 안 되는 경우
+1. 봇 토큰이 올바른지 확인
+2. 채팅 ID가 올바른지 확인 (개인 채팅의 경우 봇에게 먼저 메시지를 보내야 함)
+3. 봇이 그룹에 추가되어 있고 관리자 권한이 있는지 확인
 
 ### AI 선별이 제대로 안 되는 경우
 1. Groq API 키 확인
