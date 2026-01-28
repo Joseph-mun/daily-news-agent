@@ -13,6 +13,7 @@ import re
 import time
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 from difflib import SequenceMatcher
 from tavily import TavilyClient
@@ -37,11 +38,13 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-NOW = datetime.now()
+# 대한민국 서울 시간(KST, UTC+9) 기준 날짜
+KST = ZoneInfo("Asia/Seoul")
+NOW = datetime.now(KST)
 TODAY_STR = NOW.strftime("%Y-%m-%d")
 YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
 
-logger.info(f"📅 기준 날짜: {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
+logger.info(f"📅 기준 날짜(KST): {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
 
 
 # ==========================================
