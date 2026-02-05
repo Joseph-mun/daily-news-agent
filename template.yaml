@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Daily Security News Bot
+
+  매일 아침 7시 20분(KST)에 보안 뉴스를 수집하여 텔레그램으로 전송
+
+# ==========================================
+# 전역 설정
+# ==========================================
+Globals:
+  Function:
+    Timeout: 900  # 15분 (뉴스 수집 및 AI 처리 시간 고려)
+    MemorySize: 512  # 512MB (API 호출 및 데이터 처리에 충분)
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        PYTHONUNBUFFERED: "1"
+        TZ: "Asia/Seoul"
+
+# ==========================================
+# Lambda 함수 리소스
+# ==========================================
+Resources:
+  DailyNewsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: daily-security-news-bot
+      Description: 금융권 보안 뉴스 수집 및 텔레그램 전송 봇
+      CodeUri: ./
+      Handler: lambda_handler.lambda_handler
+
+      # 환경 변수 (AWS Secrets Manager 또는 Parameter Store 사용 권장)
+      Environment:
+        Variables:
+          # API 키들은 배포 시 수동으로 설정하거나 AWS Secrets Manager 사용
+          NAVER_CLIENT_ID: '{{resolve:secretsmanager:daily-news-bot/naver:SecretString:client_id}}'
+          NAVER_CLIENT_SECRET: '{{resolve:secretsmanager:daily-news-bot/naver:SecretString:client_secret}}'
+          TAVILY_API_KEY: '{{resolve:secretsmanager:daily-news-bot/tavily:SecretString:api_key}}'
+          GROQ_API_KEY: '{{resolve:secretsmanager:daily-news-bot/groq:SecretString:api_key}}'
+          TELEGRAM_BOT_TOKEN: '{{resolve:secretsmanager:daily-news-bot/telegram:SecretString:bot_token}}'
+          TELEGRAM_CHAT_ID: '{{resolve:secretsmanager:daily-news-bot/telegram:SecretString:chat_id}}'
+
+      # EventBridge 스케줄 설정
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(20 22 * * ? *)  # UTC 22:20 = KST 07:20 (다음날)
+            Name: daily-news-bot-schedule
+            Description: 매일 아침 7시 20분(KST)에 뉴스봇 실행
+            Enabled: true
+
+      # IAM 역할 정책 (필요 시 추가)
+      Policies:
+        - Statement:
+          - Sid: SecretsManagerAccess
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:daily-news-bot/*'
+
+# ==========================================
+# CloudWatch Logs 리소스
+# ==========================================
+  NewsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DailyNewsFunction}'
+      RetentionInDays: 30  # 30일 로그 보관
+
+# ==========================================
+# 출력 값
+# ==========================================
+Outputs:
+  DailyNewsFunctionArn:
+    Description: Lambda 함수 ARN
+    Value: !GetAtt DailyNewsFunction.Arn
+    Export:
+      Name: DailyNewsBot-FunctionArn
+
+  DailyNewsFunctionName:
+    Description: Lambda 함수 이름
+    Value: !Ref DailyNewsFunction
+    Export:
+      Name: DailyNewsBot-FunctionName
+
+  ScheduleExpression:
+    Description: EventBridge 스케줄 표현식
+    Value: cron(20 22 * * ? *)
+    Export:
+      Name: DailyNewsBot-Schedule

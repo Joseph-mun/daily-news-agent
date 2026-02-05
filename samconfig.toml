@@ -1,0 +1,35 @@
+# SAM CLI 배포 설정 파일
+# 배포 시 명령줄 파라미터를 자동으로 설정합니다.
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "daily-news-bot-stack"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+region = "ap-northeast-2"  # 서울 리전 (필요 시 변경 가능)
+s3_prefix = "daily-news-bot"
+image_repositories = []
+
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"

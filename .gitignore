@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# 환경변수 파일
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 로그 파일
+*.log
+
+# 테스트 파일
+test
+test.py
+
+# AWS SAM
+.aws-sam/
+samconfig.toml.bak
+packaged.yaml
+output.json
+
+# AWS 자격 증명 (절대 커밋하지 않기!)
+*credentials*
+*secret*
+!template.yaml
