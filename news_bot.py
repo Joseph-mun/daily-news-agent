@@ -441,17 +441,20 @@ JSON 배열로만 출력:
                     try:
                         # JSON 파싱 (배열 또는 객체)
                         parsed = json.loads(clean_text)
-                        
+
                         # 배열이 아니라 객체로 감싸진 경우 처리
                         if isinstance(parsed, dict):
-                            # {"articles": [...]} 형식일 경우
-                            for key in ['articles', 'results', 'data', 'items']:
-                                if key in parsed and isinstance(parsed[key], list):
-                                    result = parsed[key]
+                            # 모든 키를 검사하여 배열 찾기
+                            result = []
+                            for key, value in parsed.items():
+                                if isinstance(value, list) and len(value) > 0:
+                                    result = value
+                                    logger.info(f"   📋 JSON 키 '{key}'에서 {len(value)}개 항목 발견")
                                     break
-                            else:
+
+                            if not result:
                                 logger.warning(f"   ⚠️ JSON 객체에서 배열을 찾을 수 없음")
-                                result = []
+                                logger.warning(f"   📄 응답 키: {list(parsed.keys())}")
                         else:
                             result = parsed
                         
