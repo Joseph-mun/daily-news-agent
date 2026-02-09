@@ -3,7 +3,7 @@ name: Daily Security News Bot
 # 매일 아침 8시 (KST)에 실행
 on:
   schedule:
-    - cron: '20 22 * * *'  # UTC 22:20 = KST 07:20 (다음날)
+    - cron: '00 22 * * *'  # UTC 22:00 = KST 07:00 (다음날)
   workflow_dispatch:  # 수동 실행도 가능
 
 jobs:
