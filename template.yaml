@@ -39,7 +39,7 @@ Resources:
           NAVER_CLIENT_ID: '{{resolve:secretsmanager:daily-news-bot/naver:SecretString:client_id}}'
           NAVER_CLIENT_SECRET: '{{resolve:secretsmanager:daily-news-bot/naver:SecretString:client_secret}}'
           TAVILY_API_KEY: '{{resolve:secretsmanager:daily-news-bot/tavily:SecretString:api_key}}'
-          GROQ_API_KEY: '{{resolve:secretsmanager:daily-news-bot/groq:SecretString:api_key}}'
+          OPENAI_API_KEY: '{{resolve:secretsmanager:daily-news-bot/openai:SecretString:api_key}}'
           TELEGRAM_BOT_TOKEN: '{{resolve:secretsmanager:daily-news-bot/telegram:SecretString:bot_token}}'
           TELEGRAM_CHAT_ID: '{{resolve:secretsmanager:daily-news-bot/telegram:SecretString:chat_id}}'
 

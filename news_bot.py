@@ -8,6 +8,7 @@
 
 import os
 import json
+import html
 import requests
 import re
 import time
@@ -39,12 +40,11 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # 대한민국 서울 시간(KST, UTC+9) 기준 날짜
+# Lambda 웜 컨테이너 캐시 방지를 위해 main()에서 재계산
 KST = ZoneInfo("Asia/Seoul")
-NOW = datetime.now(KST)
-TODAY_STR = NOW.strftime("%Y-%m-%d")
-YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
-
-logger.info(f"📅 기준 날짜(KST): {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
+NOW = None
+TODAY_STR = None
+YESTERDAY = None
 
 
 # ==========================================
@@ -104,10 +104,10 @@ def search_naver_news() -> List[Dict[str, str]]:
 
                     # HTML 태그 제거 및 특수문자 처리
                     clean_title = re.sub('<.+?>', '', item.get('title', ''))
-                    clean_title = clean_title.replace("&quot;", "'").replace("&amp;", "&")
-                    
+                    clean_title = html.unescape(clean_title)
+
                     clean_desc = re.sub('<.+?>', '', item.get('description', ''))
-                    clean_desc = clean_desc.replace("&quot;", "'").replace("&amp;", "&")
+                    clean_desc = html.unescape(clean_desc)
 
                     all_collected[link] = {
                         "category": "[국내]",
@@ -135,7 +135,7 @@ def search_naver_news() -> List[Dict[str, str]]:
         desc = article['description'].lower()
         
         # 1순위 키워드 (AI보안, 침해사고) - 10점
-        high_priority = ['AI보안', '해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
+        high_priority = ['ai보안', '해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
         score += sum(10 for k in high_priority if k in title or k in desc)
         
         # 2순위 키워드 (제도/기술) - 5점
@@ -203,8 +203,9 @@ def search_tavily_news() -> List[Dict[str, str]]:
             if pub_date is None:
                 pub_date = ""
             
-            # 날짜 필터링 (2026년이 아니거나 'ago'가 포함된 경우 제외)
-            if pub_date and ('2026' not in pub_date and 'ago' not in pub_date):
+            # 날짜 필터링 (현재 연도가 아니거나 'ago'가 포함된 경우 제외)
+            current_year = str(NOW.year)
+            if pub_date and (current_year not in pub_date and 'ago' not in pub_date):
                 continue
 
             collected.append({
@@ -433,7 +434,7 @@ JSON 배열로만 출력:
             if res.status_code == 200:
                 response_data = res.json()
                 
-                # Groq 응답에서 텍스트 추출
+                # OpenAI 응답에서 텍스트 추출
                 if 'choices' in response_data and len(response_data['choices']) > 0:
                     content = response_data['choices'][0]['message']['content']
                     clean_text = content.replace("```json", "").replace("```", "").strip()
@@ -508,134 +509,6 @@ JSON 배열로만 출력:
             return []
             
     logger.error(f"   ❌ 3회 재시도 실패")
-    return []
-
-
-# ==========================================
-# [구 버전] Gemini 함수는 제거됨
-# 현재는 Groq API (call_groq_batch_selection) 사용
-# ==========================================
-    
-    if mode == 'KR':
-        target_count = 7
-        system_instruction = """
-        너는 금융권 보안 뉴스 전문 큐레이터다.
-        입력된 뉴스를 아래 평가 기준으로 점수화하고, 상위 7개를 선정해라.
-
-        [평가 점수표]
-        1. 침해사고 관련 (10점)
-           - 실제 해킹/랜섬웨어 발생 사건
-           - 개인정보/금융정보 유출 사고
-           - 사이버 공격으로 인한 피해
-           
-        2. 규제/정책 (7점)
-           - 금융보안원, 금감원 발표
-           - 새로운 보안 규제/가이드라인
-           - 법률 개정
-           
-        3. 기술/취약점 (5점)
-           - 제로데이 취약점 발견
-           - 새로운 공격 기법
-           - 보안 기술 동향
-           
-        4. 신한 관련 (3점 가산)
-           - 신한금융그룹 계열사 관련 뉴스
-           
-        5. 제외 대상 (-점수)
-           - 단순 홍보성 기사
-           - 인사 발령
-           - 중복 내용
-
-        [선정 절차]
-        1. 각 기사를 위 기준으로 평가
-        2. 같은 사건의 중복 기사는 1개만 선택
-        3. 다양한 카테고리에서 균형있게 선택
-        4. 최종 7개 선정
-
-        [출력 규칙]
-        - 제목은 원문 그대로 수정 없이
-        - detected_date 형식: YYYY-MM-DD
-        """
-    else:
-        target_count = 3
-        system_instruction = """
-        너는 '글로벌 보안 트렌드 분석가'이다.
-        입력된 뉴스 목록 중에서 **가장 파급력이 큰 3개** 기사를 선정해라.
-        1. 기사 제목을 반드시 **자연스러운 한국어**로 번역해라.
-        2. 우선순위: 대규모 데이터 유출 > 제로데이 취약점 > 글로벌 보안 정책.
-        """
-
-    prompt = f"""
-    [입력 데이터]
-    {json.dumps(items, ensure_ascii=False, indent=2)}
-
-    [지시사항]
-    {system_instruction}
-    
-    [출력 포맷]
-    선정된 {target_count}개의 기사를 아래 JSON 리스트 포맷으로 출력해라:
-    [
-      {{ "category": "[{ '국내' if mode == 'KR' else '해외' }]", "title": "제목", "url": "링크", "detected_date": "YYYY-MM-DD" }}
-    ]
-    """
-    
-    # temperature: 0.1 설정 (창의성 억제 -> 정확도 상승)
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1
-        }
-    }
-    
-    # 최대 3회 재시도
-    for attempt in range(3):
-        try:
-            res = requests.post(url, headers=headers, json=data, timeout=60)
-            
-            if res.status_code == 200:
-                text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                clean_text = text.replace("```json", "").replace("```", "").strip()
-                
-                try:
-                    # JSON 추출
-                    start = clean_text.find('[')
-                    end = clean_text.rfind(']') + 1
-                    if start >= 0 and end > start:
-                        result = json.loads(clean_text[start:end])
-                        logger.info(f"   ✅ AI 선별 완료 ({mode}): {len(result)}개")
-                        return result
-                    else:
-                        logger.warning(f"   ⚠️ JSON 구조를 찾을 수 없음 ({mode})")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"   ⚠️ JSON 파싱 실패 ({mode}): {e}")
-                    if attempt < 2:
-                        continue
-                    return []
-                    
-            elif res.status_code == 429:
-                wait_time = (attempt + 1) * 10
-                logger.warning(f"   ⏳ [AI 과부하] {wait_time}초 대기 후 재시도...")
-                time.sleep(wait_time)
-                continue
-            else:
-                logger.error(f"   ❌ API 오류: {res.status_code} - {res.text[:200]}")
-                if res.status_code >= 500:
-                    time.sleep(10)
-                    continue
-                return []
-                
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"   ⚠️ [연결 불안정] {e}. 10초 후 재시도 ({attempt+1}/3)...")
-            time.sleep(10)
-            continue
-        except Exception as e:
-            logger.error(f"   ❌ 예상치 못한 오류: {e}")
-            if attempt < 2:
-                time.sleep(10)
-                continue
-            return []
-            
-    logger.error(f"   ❌ 3회 재시도 실패 ({mode})")
     return []
 
 
@@ -802,8 +675,8 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         messages = [message_text]
     
     # 텔레그램 API로 메시지 전송
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
+    telegram_api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
     success_count = 0
     for msg in messages:
         try:
@@ -813,8 +686,8 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
             }
-            
-            res = requests.post(url, json=data, timeout=10)
+
+            res = requests.post(telegram_api_url, json=data, timeout=10)
             
             if res.status_code == 200:
                 success_count += 1
@@ -862,6 +735,12 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
 # ==========================================
 def main():
     """메인 실행 함수"""
+    global NOW, TODAY_STR, YESTERDAY
+    NOW = datetime.now(KST)
+    TODAY_STR = NOW.strftime("%Y-%m-%d")
+    YESTERDAY = (NOW - timedelta(days=1)).strftime("%Y-%m-%d")
+    logger.info(f"📅 기준 날짜(KST): {TODAY_STR} (어제: {YESTERDAY} 이후 기사만 허용)")
+
     try:
         logger.info("=" * 50)
         logger.info("금융권 보안 뉴스 봇 시작")

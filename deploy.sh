@@ -68,12 +68,12 @@ echo -e "\n${YELLOW}[4/5] AWS Secrets Manager 확인...${NC}"
 echo -e "${YELLOW}다음 Secrets가 필요합니다:${NC}"
 echo "  - daily-news-bot/naver"
 echo "  - daily-news-bot/tavily"
-echo "  - daily-news-bot/groq"
+echo "  - daily-news-bot/openai"
 echo "  - daily-news-bot/telegram"
 
 # Secrets 존재 여부 확인
 MISSING_SECRETS=()
-for secret in "daily-news-bot/naver" "daily-news-bot/tavily" "daily-news-bot/groq" "daily-news-bot/telegram"; do
+for secret in "daily-news-bot/naver" "daily-news-bot/tavily" "daily-news-bot/openai" "daily-news-bot/telegram"; do
     if ! aws secretsmanager describe-secret --secret-id "$secret" &> /dev/null; then
         MISSING_SECRETS+=("$secret")
     fi
