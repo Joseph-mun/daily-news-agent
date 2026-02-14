@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from tavily import TavilyClient
 
@@ -42,9 +43,10 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # 대한민국 서울 시간(KST, UTC+9) 기준 날짜
 # Lambda 웜 컨테이너 캐시 방지를 위해 main()에서 재계산
 KST = ZoneInfo("Asia/Seoul")
-NOW = None
-TODAY_STR = None
-YESTERDAY = None
+_kst_now = datetime.now(KST)
+NOW = _kst_now
+TODAY_STR = _kst_now.strftime("%Y-%m-%d")
+YESTERDAY = (_kst_now - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 # ==========================================
@@ -282,45 +284,48 @@ def remove_duplicate_articles(articles: List[Dict[str, str]]) -> List[Dict[str, 
         return keywords
     
     unique = []
-    
+    keywords_cache = []  # 기존 기사 키워드 캐시 (unique와 동일 인덱스)
+
     for article in articles:
         title = article.get('title', '')
         is_duplicate = False
-        
+
         # 현재 기사의 키워드 추출
         current_keywords = extract_keywords(title)
-        
+
         # 기존 unique 리스트의 기사들과 비교
         for i, existing in enumerate(unique):
             existing_title = existing['title']
-            existing_keywords = extract_keywords(existing_title)
-            
+            existing_keywords = keywords_cache[i]
+
             # 1. 제목 유사도 체크 (60% 이상 → 중복)
             similarity = SequenceMatcher(
                 None,
                 title.lower(),
                 existing_title.lower()
             ).ratio()
-            
+
             # 2. 키워드 중복률 체크 (공통 키워드가 50% 이상 → 중복)
             if current_keywords and existing_keywords:
                 common_keywords = current_keywords & existing_keywords
                 keyword_overlap = len(common_keywords) / min(len(current_keywords), len(existing_keywords))
             else:
                 keyword_overlap = 0
-            
+
             # 유사도 60% 이상 OR 키워드 중복 50% 이상 → 중복으로 간주
             if similarity > 0.60 or keyword_overlap > 0.50:
                 is_duplicate = True
                 # 더 긴 제목(더 상세한 기사)을 선택
                 if len(title) > len(existing_title):
                     unique[i] = article
+                    keywords_cache[i] = current_keywords
                     logger.debug(f"   🔄 중복 교체 (유사도:{similarity:.0%}, 키워드:{keyword_overlap:.0%})")
                     logger.debug(f"      '{existing_title[:30]}...' → '{title[:30]}...'")
                 break
-        
+
         if not is_duplicate:
             unique.append(article)
+            keywords_cache.append(current_keywords)
     
     removed_count = len(articles) - len(unique)
     if removed_count > 0:
@@ -459,6 +464,13 @@ JSON 배열로만 출력:
                         else:
                             result = parsed
                         
+                        # 필수 필드 검증
+                        required_fields = {'title', 'url', 'category'}
+                        result = [
+                            item for item in result
+                            if isinstance(item, dict) and required_fields.issubset(item.keys())
+                        ]
+
                         if result:
                             # 해외 기사 개수 확인
                             overseas_count = len([a for a in result if '[해외]' in a.get('category', '')])
@@ -524,12 +536,13 @@ def process_news() -> List[Dict[str, str]]:
         List[Dict]: 최종 선별된 뉴스 기사 리스트
     """
     try:
-        # 1. 국내 뉴스 수집
-        logger.info("\n📰 [1단계] 뉴스 수집 중...")
-        kr_candidates = search_naver_news()
-        
-        # 2. 해외 뉴스 수집
-        en_candidates = search_tavily_news()
+        # 1. 국내 + 해외 뉴스 병렬 수집
+        logger.info("\n📰 [1단계] 뉴스 수집 중 (병렬 처리)...")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            kr_future = executor.submit(search_naver_news)
+            en_future = executor.submit(search_tavily_news)
+            kr_candidates = kr_future.result()
+            en_candidates = en_future.result()
         
         # 3. 로컬 필터링 (명백한 제외 대상 사전 제거)
         logger.info("\n🔍 [2단계] 로컬 필터링 중...")
@@ -622,57 +635,41 @@ def send_telegram(articles: List[Dict[str, str]]) -> bool:
         return (text.replace('&', '&amp;')
                    .replace('<', '&lt;')
                    .replace('>', '&gt;'))
+
+    def escape_url(url: str) -> str:
+        """URL을 HTML 속성에 안전하게 삽입할 수 있도록 이스케이프합니다."""
+        if not url:
+            return ""
+        return escape_html(url).replace('"', '&quot;')
     
-    # 텔레그램 메시지 구성 (4096자 제한 고려)
-    message_text = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
-    
+    # 텔레그램 메시지 구성 (4096자 제한 고려, 분할 로직 통일)
+    max_length = 4096
+    messages = []
+    current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
+
     for i, item in enumerate(articles, 1):
         title = escape_html(item.get('title', ''))
-        url = item.get('url', '')
+        safe_url = escape_url(item.get('url', ''))
+        display_url = escape_html(item.get('url', ''))
         category = escape_html(item.get('category', ''))
-        
-        message_text += f"{i}. {category} <b>{title}</b>\n"
-        
+
+        new_line = f"{i}. {category} <b>{title}</b>\n"
+
         # 해외 기사 원문 표시
         if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
             title_original = escape_html(item['title_original'])
-            message_text += f"   🌐 <i>{title_original}</i>\n"
-        
-        message_text += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
-    
-    message_text += "<i>끝.</i>"
-    
-    # 텔레그램 메시지 길이 제한 (4096자) 확인 및 분할
-    max_length = 4096
-    if len(message_text) > max_length:
-        # 메시지가 너무 길면 여러 개로 분할
-        messages = []
-        current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑</b>\n\n"
-        
-        for i, item in enumerate(articles, 1):
-            title = escape_html(item.get('title', ''))
-            url = item.get('url', '')
-            category = escape_html(item.get('category', ''))
-            
-            new_line = f"{i}. {category} <b>{title}</b>\n"
-            
-            # 해외 기사 원문 표시
-            if '[해외]' in item.get('category', '') and 'title_original' in item and item['title_original']:
-                title_original = escape_html(item['title_original'])
-                new_line += f"   🌐 <i>{title_original}</i>\n"
-            
-            new_line += f"   🔗 <a href=\"{url}\">{url}</a>\n\n"
-            
-            if len(current_message) + len(new_line) > max_length - 50:  # 여유 공간 확보
-                messages.append(current_message + "<i>계속...</i>")
-                current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑 (계속)</b>\n\n"
-            
-            current_message += new_line
-        
-        current_message += "<i>끝.</i>"
-        messages.append(current_message)
-    else:
-        messages = [message_text]
+            new_line += f"   🌐 <i>{title_original}</i>\n"
+
+        new_line += f"   🔗 <a href=\"{safe_url}\">{display_url}</a>\n\n"
+
+        if len(current_message) + len(new_line) > max_length - 50:
+            messages.append(current_message + "<i>계속...</i>")
+            current_message = f"🛡️ <b>{TODAY_STR} 보안 브리핑 (계속)</b>\n\n"
+
+        current_message += new_line
+
+    current_message += "<i>끝.</i>"
+    messages.append(current_message)
     
     # 텔레그램 API로 메시지 전송
     telegram_api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
