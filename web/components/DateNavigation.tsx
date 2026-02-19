@@ -7,18 +7,22 @@ interface DateNavigationProps {
 }
 
 export default function DateNavigation({ currentDate, prevDate, nextDate }: DateNavigationProps) {
+  const btnBase = 'w-9 h-9 flex items-center justify-center rounded-full text-lg transition-colors';
+
   return (
     <div className="flex items-center justify-center gap-4">
       {prevDate ? (
         <a
           href={`/daily/${prevDate}`}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors text-lg"
+          className={`${btnBase} bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600`}
           title={prevDate}
         >
           &lsaquo;
         </a>
       ) : (
-        <span className="w-9 h-9" />
+        <span className={`${btnBase} bg-gray-50 text-gray-300 cursor-default`}>
+          &lsaquo;
+        </span>
       )}
 
       <h1 className="text-xl font-bold text-gray-900">
@@ -28,13 +32,15 @@ export default function DateNavigation({ currentDate, prevDate, nextDate }: Date
       {nextDate ? (
         <a
           href={`/daily/${nextDate}`}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors text-lg"
+          className={`${btnBase} bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600`}
           title={nextDate}
         >
           &rsaquo;
         </a>
       ) : (
-        <span className="w-9 h-9" />
+        <span className={`${btnBase} bg-gray-50 text-gray-300 cursor-default`}>
+          &rsaquo;
+        </span>
       )}
     </div>
   );
