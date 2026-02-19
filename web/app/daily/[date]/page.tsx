@@ -54,7 +54,7 @@ export default async function DailyPage({ params }: PageProps) {
             전략적 분석
           </h2>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
-            <AnalysisReport markdown={data.briefing.analysis} />
+            <AnalysisReport markdown={data.briefing.analysis} articles={data.articles} />
           </div>
         </section>
       )}
