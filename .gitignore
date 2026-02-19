@@ -31,6 +31,12 @@ Thumbs.db
 test
 test.py
 
+# Next.js / Web
+web/node_modules/
+web/.next/
+web/out/
+web/.env.local
+
 # AWS SAM
 .aws-sam/
 samconfig.toml.bak

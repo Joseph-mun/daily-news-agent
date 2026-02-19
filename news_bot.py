@@ -9,11 +9,13 @@
 import os
 import json
 import html
+import sqlite3
 import requests
 import re
 import time
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -409,9 +411,15 @@ JSON 배열로만 출력:
     "title": "제목 (해외 기사는 한글로 번역)",
     "title_original": "원문 제목 (해외 기사만, 국내는 생략)",
     "url": "링크",
-    "detected_date": "YYYY-MM-DD"
+    "detected_date": "YYYY-MM-DD",
+    "summary": "50자 이내 한국어 핵심 요약 1줄",
+    "insight": "70자 이내, 금융 정보보호팀 시사점. '~을 검토/점검해야 한다' 형식"
   }}
 ]
+
+⚠️ **summary/insight 규칙**:
+- summary: 기사 핵심을 50자 이내로 압축. "~했다/~됐다" 형식
+- insight: 금융사 정보보호팀이 취해야 할 조치. "~을 검토해야 한다/점검해야 한다" 형식
 
 ⚠️ **해외 기사 번역 규칙**:
 - [해외] 기사의 title은 **반드시 한글로 번역**
@@ -427,7 +435,7 @@ JSON 배열로만 출력:
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 1500,
+        "max_tokens": 2500,
         "response_format": {"type": "json_object"}
     }
     
@@ -595,6 +603,240 @@ def process_news() -> List[Dict[str, str]]:
 
 
 # ==========================================
+# 전략적 분석 리포트 생성 (GPT-4o)
+# ==========================================
+def generate_strategic_analysis(articles: List[Dict[str, str]]) -> str:
+    """
+    선별된 기사를 기반으로 전략적 분석 리포트를 생성합니다.
+    GPT-4o를 사용하여 CISO/정보보호팀장 수준의 분석을 제공합니다.
+
+    Args:
+        articles: 선별된 뉴스 기사 리스트 (10개)
+
+    Returns:
+        str: 마크다운 형식의 전략적 분석 리포트
+    """
+    if not articles:
+        return ""
+
+    if not OPENAI_API_KEY:
+        logger.error("❌ OpenAI API 키가 없습니다.")
+        return ""
+
+    logger.info("\n📝 [전략적 분석] GPT-4o로 리포트 생성 중...")
+
+    # 기사 요약 목록 구성
+    article_list = ""
+    for i, art in enumerate(articles, 1):
+        category = art.get('category', '')
+        title = art.get('title', '')
+        summary = art.get('summary', '')
+        article_list += f"[{i}] {category} {title}\n    요약: {summary}\n"
+
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        'Authorization': f'Bearer {OPENAI_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+    system_prompt = """너는 금융권 CISO 자문역이다.
+매일 선별된 보안 뉴스 10건을 종합 분석하여, 금융사 정보보호팀장이 경영진에게 보고할 수 있는 수준의 전략적 브리핑을 작성한다.
+
+작성 원칙:
+- 단순 사실 나열이 아닌 맥락과 의미 해석
+- 금융권 특수성(규제, 고객데이터, 신뢰)을 반영
+- 기사 번호를 [N] 형식으로 참조
+- 한글 기준 1,500~3,000자"""
+
+    user_prompt = f"""아래 10개 기사를 분석하여 3파트 전략적 리포트를 작성하라.
+
+[기사 목록]
+{article_list}
+
+[출력 형식 - 마크다운]
+
+## 1. 요약: (핵심 테마를 포괄하는 소제목)
+
+당일 기사를 2~3개 핵심 테마로 묶어 분석.
+각 테마에 소제목을 부여하고, 관련 기사를 [번호]로 참조.
+
+### A. (테마 소제목)
+분석 내용... [N][M]
+
+### B. (테마 소제목)
+분석 내용... [N]
+
+## 2. 금융사 정보보호팀을 위한 전략적 제언
+
+즉시 실행 가능한 3개 내외 액션 아이템. 각각 Logic과 Action 포함.
+
+### ① (제언 제목)
+- Logic: ...
+- Action: ...
+
+### ② (제언 제목)
+- Logic: ...
+- Action: ...
+
+## 3. 생각해볼 질문
+
+정보보호팀 내 토론용 도발적 질문 2~3개. 당일 기사와 연결하되 자사 적용 관점.
+
+### Q1
+질문 내용
+
+### Q2
+질문 내용"""
+
+    data = {
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.4,
+        "max_tokens": 4000
+    }
+
+    for attempt in range(3):
+        try:
+            res = requests.post(url, headers=headers, json=data, timeout=90)
+
+            if res.status_code == 200:
+                response_data = res.json()
+                if 'choices' in response_data and len(response_data['choices']) > 0:
+                    content = response_data['choices'][0]['message']['content']
+                    logger.info(f"   ✅ 전략적 분석 리포트 생성 완료 ({len(content)}자)")
+                    return content
+                else:
+                    logger.warning("   ⚠️ 응답 형식 오류")
+                    return ""
+            elif res.status_code == 429:
+                wait_time = (attempt + 1) * 15
+                logger.warning(f"   ⏳ [API 과부하] {wait_time}초 대기 후 재시도...")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"   ❌ API 오류: {res.status_code} - {res.text[:200]}")
+                if res.status_code >= 500:
+                    time.sleep(10)
+                    continue
+                return ""
+
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"   ⚠️ [연결 불안정] {e}. 10초 후 재시도 ({attempt+1}/3)...")
+            time.sleep(10)
+            continue
+        except Exception as e:
+            logger.error(f"   ❌ 예상치 못한 오류: {e}")
+            if attempt < 2:
+                time.sleep(10)
+                continue
+            return ""
+
+    logger.error("   ❌ 전략적 분석 리포트 생성 3회 재시도 실패")
+    return ""
+
+
+# ==========================================
+# SQLite 저장
+# ==========================================
+def save_to_sqlite(
+    articles: List[Dict[str, str]],
+    analysis: str,
+    date_str: str
+) -> bool:
+    """
+    선별된 기사와 전략적 분석 리포트를 SQLite DB에 저장합니다.
+
+    Args:
+        articles: 선별된 뉴스 기사 리스트
+        analysis: 전략적 분석 리포트 (마크다운)
+        date_str: 날짜 문자열 (YYYY-MM-DD)
+
+    Returns:
+        bool: 저장 성공 여부
+    """
+    if not articles:
+        logger.warning("⚠️ 저장할 기사가 없습니다.")
+        return False
+
+    db_path = Path(__file__).parent / "web" / "data" / "news.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"\n💾 [SQLite] {db_path} 에 저장 중...")
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+
+        # 테이블 생성 (없으면)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_briefings (
+                date        TEXT PRIMARY KEY,
+                analysis    TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS articles (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                date            TEXT NOT NULL,
+                category        TEXT,
+                title           TEXT NOT NULL,
+                title_original  TEXT,
+                url             TEXT NOT NULL,
+                summary         TEXT,
+                insight         TEXT,
+                detected_date   TEXT,
+                created_at      TEXT NOT NULL
+            )
+        """)
+
+        now_iso = datetime.now(KST).isoformat()
+
+        # 기존 데이터 삭제 (같은 날짜 중복 방지)
+        cursor.execute("DELETE FROM daily_briefings WHERE date = ?", (date_str,))
+        cursor.execute("DELETE FROM articles WHERE date = ?", (date_str,))
+
+        # 분석 리포트 저장
+        if analysis:
+            cursor.execute(
+                "INSERT INTO daily_briefings (date, analysis, created_at) VALUES (?, ?, ?)",
+                (date_str, analysis, now_iso)
+            )
+
+        # 기사 저장
+        for art in articles:
+            cursor.execute(
+                """INSERT INTO articles
+                   (date, category, title, title_original, url, summary, insight, detected_date, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    date_str,
+                    art.get('category', ''),
+                    art.get('title', ''),
+                    art.get('title_original', ''),
+                    art.get('url', ''),
+                    art.get('summary', ''),
+                    art.get('insight', ''),
+                    art.get('detected_date', ''),
+                    now_iso
+                )
+            )
+
+        conn.commit()
+        conn.close()
+        logger.info(f"   ✅ SQLite 저장 완료: 기사 {len(articles)}건, 분석 리포트 1건")
+        return True
+
+    except Exception as e:
+        logger.error(f"   ❌ SQLite 저장 오류: {e}")
+        return False
+
+
+# ==========================================
 # 텔레그램 전송
 # ==========================================
 def send_telegram(articles: List[Dict[str, str]]) -> bool:
@@ -744,10 +986,22 @@ def main():
         logger.info("=" * 50)
         
         final_news = process_news()
-        
+
         if final_news:
             logger.info(f"\n📊 최종 선별된 뉴스: {len(final_news)}개")
+
+            # 텔레그램 전송 (기존)
             send_telegram(final_news)
+
+            # 웹사이트용 처리 (신규) - 텔레그램 실패와 독립
+            try:
+                # 전략적 분석 리포트 생성 (GPT-4o)
+                analysis = generate_strategic_analysis(final_news)
+
+                # SQLite 저장
+                save_to_sqlite(final_news, analysis, TODAY_STR)
+            except Exception as e:
+                logger.error(f"❌ 웹사이트 데이터 처리 실패 (텔레그램 전송에는 영향 없음): {e}")
         else:
             logger.warning("⚠️ 최종 선별된 뉴스가 없습니다.")
             
