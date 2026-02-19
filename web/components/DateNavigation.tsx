@@ -27,7 +27,7 @@ export default function DateNavigation({ currentDate, prevDate, nextDate }: Date
       </h1>
 
       {isLatest ? (
-        <span className="text-sm text-blue-600 font-medium">최신</span>
+        <span />
       ) : nextDate ? (
         <a
           href={`/daily/${nextDate}`}

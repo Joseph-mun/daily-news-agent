@@ -6,6 +6,61 @@ export const metadata: Metadata = {
   description: '과거 금융권 보안 뉴스 브리핑 아카이브',
 };
 
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function CalendarMonth({ year, month, activeDates }: { year: number; month: number; activeDates: Set<string> }) {
+  const firstDay = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <h2 className="text-lg font-semibold text-gray-800 mb-3 text-center">
+        {year}년 {month}월
+      </h2>
+      <div className="grid grid-cols-7 gap-1">
+        {WEEKDAYS.map((wd) => (
+          <div key={wd} className="text-center text-xs font-medium text-gray-400 py-1">
+            {wd}
+          </div>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) {
+            return <div key={`empty-${i}`} />;
+          }
+
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const hasData = activeDates.has(dateStr);
+
+          if (hasData) {
+            return (
+              <a
+                key={dateStr}
+                href={`/daily/${dateStr}`}
+                className="flex items-center justify-center h-9 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+              >
+                {day}
+              </a>
+            );
+          }
+
+          return (
+            <div
+              key={dateStr}
+              className="flex items-center justify-center h-9 rounded-lg text-sm text-gray-300"
+            >
+              {day}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default async function ArchivePage() {
   const datesByMonth = await getDatesByMonth();
   const months = Object.keys(datesByMonth).sort().reverse();
@@ -19,35 +74,25 @@ export default async function ArchivePage() {
     );
   }
 
+  // 모든 날짜를 Set으로 모아두기
+  const allDates = new Set<string>();
+  for (const dates of Object.values(datesByMonth)) {
+    for (const d of dates) allDates.add(d);
+  }
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-8">아카이브</h1>
-      <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {months.map((month) => {
-          const [year, mon] = month.split('-');
-          const label = `${year}년 ${parseInt(mon)}월`;
-          const dates = datesByMonth[month];
-
+          const [y, m] = month.split('-');
           return (
-            <div key={month}>
-              <h2 className="text-lg font-semibold text-gray-700 mb-3">
-                {label}
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {dates.map((date) => {
-                  const day = parseInt(date.split('-')[2]);
-                  return (
-                    <a
-                      key={date}
-                      href={`/daily/${date}`}
-                      className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white border border-gray-200 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
-                    >
-                      {day}
-                    </a>
-                  );
-                })}
-              </div>
-            </div>
+            <CalendarMonth
+              key={month}
+              year={parseInt(y)}
+              month={parseInt(m)}
+              activeDates={allDates}
+            />
           );
         })}
       </div>
