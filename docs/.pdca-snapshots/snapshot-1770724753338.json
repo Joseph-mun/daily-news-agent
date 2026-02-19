@@ -1,0 +1,122 @@
+{
+  "timestamp": "2026-02-10T11:59:13.333Z",
+  "reason": "compaction",
+  "status": {
+    "version": "2.0",
+    "lastUpdated": "2026-02-10T09:39:13.878Z",
+    "activeFeatures": [
+      "bug-fixs",
+      "01_dailynewsbot"
+    ],
+    "primaryFeature": "bug-fixs",
+    "features": {
+      "bug-fixs": {
+        "phase": "completed",
+        "startedAt": "2026-02-10T09:15:00.000Z",
+        "matchRate": 100,
+        "iterationCount": 0
+      },
+      "01_dailynewsbot": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-02-10T09:35:14.658Z",
+          "lastUpdated": "2026-02-10T09:39:13.878Z"
+        },
+        "lastFile": "/Users/joseph/Library/Mobile Documents/com~apple~CloudDocs/02_자기계발/03_AI/00_AI 에이전트/01_dailynewsbot/deploy.sh"
+      }
+    },
+    "pipeline": {
+      "currentPhase": 1,
+      "level": "Dynamic",
+      "phaseHistory": []
+    },
+    "session": {
+      "startedAt": "2026-02-10T09:10:44.923Z",
+      "onboardingCompleted": false,
+      "lastActivity": "2026-02-10T09:39:13.878Z"
+    },
+    "history": [
+      {
+        "action": "plan_created",
+        "feature": "bug-fixs",
+        "timestamp": "2026-02-10T09:15:00.000Z"
+      },
+      {
+        "action": "design_created",
+        "feature": "bug-fixs",
+        "timestamp": "2026-02-10T09:20:00.000Z"
+      },
+      {
+        "timestamp": "2026-02-10T09:35:14.658Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:35:53.322Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:36:12.267Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:37:05.079Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:37:23.726Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:37:36.745Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:37:50.231Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:38:10.321Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:38:23.766Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:39:00.253Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-10T09:39:13.878Z",
+        "feature": "01_dailynewsbot",
+        "phase": "do",
+        "action": "updated"
+      }
+    ]
+  }
+}

@@ -47,3 +47,4 @@ output.json
 *credentials*
 *secret*
 !template.yaml
+.vercel

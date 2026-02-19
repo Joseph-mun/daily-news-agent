@@ -1,0 +1,261 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1771456354056,
+  "projectRoot": "/Users/joseph/Library/Mobile Documents/com~apple~CloudDocs/02_build/03_AI/00_AI agent/01_dailynewsbot",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1771456354034,
+      "keyFiles": [
+        "news_bot.cpython-314.pyc"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1771456354053,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "news_bot.py",
+      "accessCount": 27,
+      "lastAccessed": 1771466936066,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 9,
+      "lastAccessed": 1771465381536,
+      "type": "directory"
+    },
+    {
+      "path": "web/lib/db.ts",
+      "accessCount": 6,
+      "lastAccessed": 1771466264032,
+      "type": "file"
+    },
+    {
+      "path": "template.yaml",
+      "accessCount": 5,
+      "lastAccessed": 1771465361352,
+      "type": "file"
+    },
+    {
+      "path": "deploy.sh",
+      "accessCount": 5,
+      "lastAccessed": 1771465371002,
+      "type": "file"
+    },
+    {
+      "path": "web/package.json",
+      "accessCount": 5,
+      "lastAccessed": 1771466267693,
+      "type": "file"
+    },
+    {
+      "path": "web/app/page.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1771466266729,
+      "type": "file"
+    },
+    {
+      "path": "web/app/daily/[date]/page.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1771466267106,
+      "type": "file"
+    },
+    {
+      "path": "web/next.config.ts",
+      "accessCount": 4,
+      "lastAccessed": 1771466529841,
+      "type": "file"
+    },
+    {
+      "path": "web/components/NewsCard.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1771466942706,
+      "type": "file"
+    },
+    {
+      "path": "requirements.txt",
+      "accessCount": 3,
+      "lastAccessed": 1771464871867,
+      "type": "file"
+    },
+    {
+      "path": "web/app/layout.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1771466267479,
+      "type": "file"
+    },
+    {
+      "path": "web/lib/turso.ts",
+      "accessCount": 3,
+      "lastAccessed": 1771466272506,
+      "type": "file"
+    },
+    {
+      "path": "web/app/archive/page.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1771466273206,
+      "type": "file"
+    },
+    {
+      "path": "web/lib/types.ts",
+      "accessCount": 3,
+      "lastAccessed": 1771466639630,
+      "type": "file"
+    },
+    {
+      "path": "web/app/api/comments/route.ts",
+      "accessCount": 3,
+      "lastAccessed": 1771466911171,
+      "type": "file"
+    },
+    {
+      "path": ".env.example",
+      "accessCount": 2,
+      "lastAccessed": 1771458345607,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 2,
+      "lastAccessed": 1771458349639,
+      "type": "file"
+    },
+    {
+      "path": "lambda_handler.py",
+      "accessCount": 2,
+      "lastAccessed": 1771458350272,
+      "type": "file"
+    },
+    {
+      "path": "web/components/AnalysisReport.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1771466264636,
+      "type": "file"
+    },
+    {
+      "path": "web/components/CategoryChart.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1771466269628,
+      "type": "file"
+    },
+    {
+      "path": "web/components/DateNavigation.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1771466269943,
+      "type": "file"
+    },
+    {
+      "path": "web/components/CommentSection.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1771466270263,
+      "type": "file"
+    },
+    {
+      "path": "web/app/globals.css",
+      "accessCount": 2,
+      "lastAccessed": 1771466272860,
+      "type": "file"
+    },
+    {
+      "path": "web/tailwind.config.ts",
+      "accessCount": 2,
+      "lastAccessed": 1771466529452,
+      "type": "file"
+    },
+    {
+      "path": "samconfig.toml",
+      "accessCount": 1,
+      "lastAccessed": 1771458100866,
+      "type": "file"
+    },
+    {
+      "path": "README_AWS.md",
+      "accessCount": 1,
+      "lastAccessed": 1771458101140,
+      "type": "file"
+    },
+    {
+      "path": "web/tsconfig.json",
+      "accessCount": 1,
+      "lastAccessed": 1771459596710,
+      "type": "file"
+    },
+    {
+      "path": "web/postcss.config.js",
+      "accessCount": 1,
+      "lastAccessed": 1771459599676,
+      "type": "file"
+    },
+    {
+      "path": "web/types/sql.js.d.ts",
+      "accessCount": 1,
+      "lastAccessed": 1771460603999,
+      "type": "file"
+    },
+    {
+      "path": "web/.env.local",
+      "accessCount": 1,
+      "lastAccessed": 1771466530047,
+      "type": "file"
+    },
+    {
+      "path": "web/app/api/telegram-webhook/route.ts",
+      "accessCount": 1,
+      "lastAccessed": 1771466965752,
+      "type": "file"
+    },
+    {
+      "path": "update_analysis.py",
+      "accessCount": 1,
+      "lastAccessed": 1771466982876,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
