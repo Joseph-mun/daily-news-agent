@@ -413,15 +413,14 @@ JSON 배열로만 출력:
     "title_original": "원문 제목 (해외 기사만, 국내는 생략)",
     "url": "링크",
     "detected_date": "YYYY-MM-DD",
-    "summary": "150자 이내 3줄 요약 (1줄: 사건요약, 2줄: 중요한 이유, 3줄: 시사점/전망)"
+    "summary": "150자 이내 3줄 요약. 기사의 핵심 사실만 간결하게 정리"
   }}
 ]
 
 ⚠️ **summary 규칙**:
-- summary: 기사 핵심을 150자 이내, 3줄로 요약. 각 줄은 핵심 사실 하나씩 담을 것
-- 1줄: 무엇이 일어났는가 (사건/발표 요약)
-- 2줄: 왜 중요한가 (영향/배경)
-- 3줄: 어떤 의미가 있는가 (시사점/전망)
+- summary: 기사의 핵심 사실을 150자 이내, 3줄로 요약
+- 전략적 제언, 시사점, 대응방안 등은 쓰지 말 것
+- 기사에 나온 사실(누가, 무엇을, 어떻게)만 간결하게 정리
 
 ⚠️ **해외 기사 번역 규칙**:
 - [해외] 기사의 title은 **반드시 한글로 번역**
@@ -998,13 +997,9 @@ def main():
             # 텔레그램 전송 (기존)
             send_telegram(final_news)
 
-            # 웹사이트용 처리 (신규) - 텔레그램 실패와 독립
+            # 웹사이트용 처리 - 기사만 저장 (분석은 텔레그램 /분석 명령어로 별도 제공)
             try:
-                # 전략적 분석 리포트 생성 (GPT-4o)
-                analysis = generate_strategic_analysis(final_news)
-
-                # SQLite 저장
-                save_to_sqlite(final_news, analysis, TODAY_STR)
+                save_to_sqlite(final_news, "", TODAY_STR)
             except Exception as e:
                 logger.error(f"❌ 웹사이트 데이터 처리 실패 (텔레그램 전송에는 영향 없음): {e}")
         else:
