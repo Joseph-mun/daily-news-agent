@@ -2,7 +2,7 @@
 금융권 보안 뉴스 수집 및 텔레그램 전송 봇
 
 이 스크립트는 네이버 뉴스 API와 Tavily API를 사용하여
-금융권 보안 관련 뉴스를 수집하고, OpenAI API로 선별한 후
+금융권 보안 관련 뉴스를 수집하고, Groq API로 선별한 후
 텔레그램으로 전송합니다.
 """
 
@@ -39,6 +39,7 @@ NAVER_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -339,13 +340,13 @@ def remove_duplicate_articles(articles: List[Dict[str, str]]) -> List[Dict[str, 
 
 
 # ==========================================
-# AI 선별 (OpenAI API) - 배치 처리 방식
+# AI 선별 (Groq API) - 배치 처리 방식
 # ==========================================
-def call_openai_batch_selection(
+def call_groq_batch_selection(
     items: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
     """
-    OpenAI API를 사용하여 국내·해외 뉴스를 한 번에 선별합니다.
+    Groq API (Llama 3.3 70B)를 사용하여 국내·해외 뉴스를 한 번에 선별합니다.
     (API 호출 2회 → 1회로 절감)
 
     Args:
@@ -357,13 +358,13 @@ def call_openai_batch_selection(
     if not items:
         return []
 
-    if not OPENAI_API_KEY:
-        logger.error("❌ OpenAI API 키가 없습니다.")
+    if not GROQ_API_KEY:
+        logger.error("❌ Groq API 키가 없습니다.")
         return []
 
-    url = "https://api.openai.com/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        'Authorization': f'Bearer {OPENAI_API_KEY}',
+        'Authorization': f'Bearer {GROQ_API_KEY}',
         'Content-Type': 'application/json'
     }
     
@@ -429,14 +430,13 @@ JSON 배열로만 출력:
     
     # OpenAI API 요청
     data = {
-        "model": "gpt-4o-mini",  # 비용 효율적이고 빠른 모델
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 2500,
-        "response_format": {"type": "json_object"}
+        "max_tokens": 2500
     }
     
     # 최대 3회 재시도
@@ -480,9 +480,13 @@ JSON 배열로만 출력:
                         ]
 
                         if result:
-                            # 해외 기사 개수 확인
-                            overseas_count = len([a for a in result if '[해외]' in a.get('category', '')])
-                            domestic_count = len(result) - overseas_count
+                            # 국내 → 해외 순서로 정렬
+                            domestic = [a for a in result if '[국내]' in a.get('category', '')]
+                            overseas = [a for a in result if '[해외]' in a.get('category', '')]
+                            result = domestic + overseas
+
+                            overseas_count = len(overseas)
+                            domestic_count = len(domestic)
                             
                             # 해외 기사 부족 시 경고
                             if overseas_count == 0:
@@ -491,7 +495,7 @@ JSON 배열로만 출력:
                             elif overseas_count < 3:
                                 logger.warning(f"   ⚠️ 해외 기사 {overseas_count}개만 선별됨 (목표: 3개)")
                             
-                            logger.info(f"   ✅ AI 배치 선별 완료 (OpenAI): {len(result)}개 (국내 {domestic_count}, 해외 {overseas_count})")
+                            logger.info(f"   ✅ AI 배치 선별 완료 (Groq): {len(result)}개 (국내 {domestic_count}, 해외 {overseas_count})")
                             return result
                         else:
                             logger.warning(f"   ⚠️ 선별된 기사가 없음")
@@ -586,9 +590,9 @@ def process_news() -> List[Dict[str, str]]:
             return []
         
         logger.info(f"\n🤖 [3단계] AI가 국내 7개 + 해외 3개를 선별합니다...")
-        logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (OpenAI GPT-4o-mini)")
+        logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (Groq Llama-3.3-70B)")
 
-        final_list = call_openai_batch_selection(all_candidates)
+        final_list = call_groq_batch_selection(all_candidates)
         
         if final_list:
             logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료")
