@@ -2,10 +2,12 @@
 수동 분석 리포트를 news.db에 업데이트하는 스크립트.
 GitHub Actions에서 repository_dispatch 이벤트로 호출됩니다.
 
-Usage:
-    python update_analysis.py <date> <analysis_text>
+환경변수:
+    ANALYSIS_DATE: 날짜 (YYYY-MM-DD)
+    ANALYSIS_TEXT: 분석 내용
 """
 
+import os
 import sqlite3
 import sys
 from datetime import datetime
@@ -13,12 +15,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python update_analysis.py <YYYY-MM-DD> <analysis_text>")
-        sys.exit(1)
+    date_str = os.environ.get("ANALYSIS_DATE", "")
+    analysis = os.environ.get("ANALYSIS_TEXT", "")
 
-    date_str = sys.argv[1]
-    analysis = sys.argv[2]
+    if not date_str or not analysis:
+        print("Error: ANALYSIS_DATE and ANALYSIS_TEXT environment variables required")
+        sys.exit(1)
 
     db_path = Path(__file__).parent / "web" / "data" / "news.db"
 
@@ -48,6 +50,7 @@ def main():
         )
         print(f"Inserted analysis for {date_str}")
 
+    print(f"Analysis length: {len(analysis)} chars")
     conn.commit()
     conn.close()
 

@@ -23,8 +23,11 @@ jobs:
           python-version: '3.11'
 
       - name: Update analysis in DB
+        env:
+          ANALYSIS_DATE: ${{ github.event.client_payload.date }}
+          ANALYSIS_TEXT: ${{ github.event.client_payload.analysis }}
         run: |
-          python update_analysis.py "${{ github.event.client_payload.date }}" "${{ github.event.client_payload.analysis }}"
+          python update_analysis.py
 
       - name: Commit and push
         run: |
