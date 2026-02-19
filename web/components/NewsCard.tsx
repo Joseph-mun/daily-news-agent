@@ -41,17 +41,10 @@ export default function NewsCard({ article, index }: NewsCardProps) {
             </p>
           )}
 
-          {/* AI 요약 */}
+          {/* AI 요약 (3줄) */}
           {article.summary && (
-            <p className="text-sm text-gray-600 mb-1">
-              <span className="font-medium text-gray-500">요약:</span> {article.summary}
-            </p>
-          )}
-
-          {/* 보안팀 시사점 */}
-          {article.insight && (
-            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-1.5 mt-2">
-              {article.insight}
+            <p className="text-sm text-gray-600 mb-1 whitespace-pre-line">
+              {article.summary}
             </p>
           )}
 

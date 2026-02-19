@@ -413,14 +413,15 @@ JSON 배열로만 출력:
     "title_original": "원문 제목 (해외 기사만, 국내는 생략)",
     "url": "링크",
     "detected_date": "YYYY-MM-DD",
-    "summary": "50자 이내 한국어 핵심 요약 1줄",
-    "insight": "70자 이내, 금융 정보보호팀 시사점. '~을 검토/점검해야 한다' 형식"
+    "summary": "150자 이내 3줄 요약 (1줄: 사건요약, 2줄: 중요한 이유, 3줄: 시사점/전망)"
   }}
 ]
 
-⚠️ **summary/insight 규칙**:
-- summary: 기사 핵심을 50자 이내로 압축. "~했다/~됐다" 형식
-- insight: 금융사 정보보호팀이 취해야 할 조치. "~을 검토해야 한다/점검해야 한다" 형식
+⚠️ **summary 규칙**:
+- summary: 기사 핵심을 150자 이내, 3줄로 요약. 각 줄은 핵심 사실 하나씩 담을 것
+- 1줄: 무엇이 일어났는가 (사건/발표 요약)
+- 2줄: 왜 중요한가 (영향/배경)
+- 3줄: 어떤 의미가 있는가 (시사점/전망)
 
 ⚠️ **해외 기사 번역 규칙**:
 - [해외] 기사의 title은 **반드시 한글로 번역**
@@ -824,7 +825,7 @@ def save_to_sqlite(
                     art.get('title_original', ''),
                     art.get('url', ''),
                     art.get('summary', ''),
-                    art.get('insight', ''),
+                    '',
                     art.get('detected_date', ''),
                     now_iso
                 )
