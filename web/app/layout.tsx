@@ -17,7 +17,7 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
             <a href="/" className="text-lg font-bold text-gray-900 hover:text-blue-600 transition-colors">
-              보안 브리핑
+              정보보호 뉴스
             </a>
             <a
               href="/archive"
