@@ -7,36 +7,34 @@ interface DateNavigationProps {
 }
 
 export default function DateNavigation({ currentDate, prevDate, nextDate }: DateNavigationProps) {
-  const isLatest = !nextDate;
-
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-center gap-4">
       {prevDate ? (
         <a
           href={`/daily/${prevDate}`}
-          className="text-sm text-gray-500 hover:text-blue-600 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors text-lg"
+          title={prevDate}
         >
-          &larr; {prevDate}
+          &lsaquo;
         </a>
       ) : (
-        <span />
+        <span className="w-9 h-9" />
       )}
 
       <h1 className="text-xl font-bold text-gray-900">
-        {currentDate} 보안 브리핑
+        {currentDate} 정보보호 뉴스
       </h1>
 
-      {isLatest ? (
-        <span />
-      ) : nextDate ? (
+      {nextDate ? (
         <a
           href={`/daily/${nextDate}`}
-          className="text-sm text-gray-500 hover:text-blue-600 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors text-lg"
+          title={nextDate}
         >
-          {nextDate} &rarr;
+          &rsaquo;
         </a>
       ) : (
-        <span />
+        <span className="w-9 h-9" />
       )}
     </div>
   );
