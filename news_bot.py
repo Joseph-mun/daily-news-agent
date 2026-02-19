@@ -437,7 +437,7 @@ JSON 배열로만 출력:
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 2500
+        "max_tokens": 4096
     }
     
     # 최대 3회 재시도
