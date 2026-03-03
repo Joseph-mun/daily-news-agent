@@ -62,7 +62,7 @@ def search_naver_news() -> List[Dict[str, str]]:
     Returns:
         List[Dict]: 수집된 뉴스 기사 리스트
     """
-    keywords = ["AI보안", "정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어"]
+    keywords = ["AI보안", "정보보호", "해킹", "개인정보유출", "금융보안", "랜섬웨어", "개인정보보호법", "KISA 사이버"]
     logger.info(f"🇰🇷 [국내] 네이버 분할 검색 시작: {keywords}")
     
     if not NAVER_ID or not NAVER_SECRET:
@@ -140,16 +140,22 @@ def search_naver_news() -> List[Dict[str, str]]:
         desc = article['description'].lower()
         
         # 1순위 키워드 (AI보안, 침해사고) - 10점
-        high_priority = ['ai보안', '해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
+        high_priority = ['ai보안', 'ai 보안', '해킹', '유출', '랜섬웨어', '사이버공격', '보안사고', '침해']
         score += sum(10 for k in high_priority if k in title or k in desc)
-        
-        # 2순위 키워드 (제도/기술) - 5점
-        mid_priority = ['금융보안원', '금감원', '규제', '보안기술', '제로데이', '취약점']
+
+        # 1순위 키워드 (규제/정책/법률) - 10점
+        regulation = ['개보법', '개인정보보호법', '신정법', '신용정보법', '전자금융거래법', '전자금융감독규정',
+                      'kisa', '금보원', '금융보안원', '금감원', '금융감독원', '과기정통부', '개인정보위',
+                      '사이버특사경', '수사권', '법개정', '법 개정', '재개정', '시행령']
+        score += sum(10 for k in regulation if k in title or k in desc)
+
+        # 2순위 키워드 (기술/취약점) - 5점
+        mid_priority = ['보안기술', '제로데이', '취약점', 'cve-']
         score += sum(5 for k in mid_priority if k in title or k in desc)
-        
-        # 3순위 키워드 (신한) - 3점
-        if '신한' in title or '신한' in desc:
-            score += 3
+
+        # 3순위 키워드 (금융권/신한) - 3점
+        finance = ['신한', '금융권', '금융사', '은행']
+        score += sum(3 for k in finance if k in title or k in desc)
         
         # 날짜 가중치 (당일 기사 우대) - 2점
         if article['published_date'] == TODAY_STR:
