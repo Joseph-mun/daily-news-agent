@@ -510,14 +510,19 @@ JSON 배열로만 출력:
 
                             overseas_count = len(overseas)
                             domestic_count = len(domestic)
-                            
+
+                            # 국내 기사 부족 시 재시도 (Groq 모델 불안정 대응)
+                            if domestic_count < 5 and attempt < 2:
+                                logger.warning(f"   ⚠️ 국내 기사 {domestic_count}개만 선별됨 (목표: 7개). 재시도...")
+                                time.sleep(3)
+                                continue
+
                             # 해외 기사 부족 시 경고
                             if overseas_count == 0:
                                 logger.warning("   ⚠️ 해외 기사가 선별되지 않았습니다.")
-                                logger.warning("   💡 Tavily 검색 결과 확인 또는 검색 키워드 조정 필요")
                             elif overseas_count < 3:
                                 logger.warning(f"   ⚠️ 해외 기사 {overseas_count}개만 선별됨 (목표: 3개)")
-                            
+
                             logger.info(f"   ✅ AI 배치 선별 완료 (Groq): {len(result)}개 (국내 {domestic_count}, 해외 {overseas_count})")
                             return result
                         else:
@@ -616,12 +621,76 @@ def process_news() -> List[Dict[str, str]]:
         logger.info(f"   💡 배치 처리로 API 호출 1회만 사용 (Groq Llama-3.3-70B)")
 
         final_list = call_groq_batch_selection(all_candidates)
-        
+
         if final_list:
-            logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료")
+            # Groq 결과 검증 및 fallback
+            domestic = [a for a in final_list if '[국내]' in a.get('category', '')]
+            overseas = [a for a in final_list if '[해외]' in a.get('category', '')]
+
+            need_fallback = False
+
+            # 국내 기사 부족 시 로컬 점수 기반 보충
+            if len(domestic) < 5 and kr_unique:
+                need_fallback = True
+                logger.warning(f"   ⚠️ 국내 기사 {len(domestic)}개로 부족. 로컬 점수 기반 fallback 적용")
+                selected_urls = {a['url'] for a in final_list}
+                fallback_kr = [a for a in kr_unique if a['url'] not in selected_urls]
+                needed = 7 - len(domestic)
+                for art in fallback_kr[:needed]:
+                    domestic.append({
+                        "category": "[국내]",
+                        "title": art['title'],
+                        "url": art['url'],
+                        "detected_date": art.get('published_date', TODAY_STR),
+                        "summary": art.get('description', '')[:150]
+                    })
+                logger.info(f"   🔄 국내 기사 {len(domestic)}개로 보충 완료")
+
+            # 해외 기사 부족 시 로컬 보충
+            if len(overseas) < 3 and en_unique:
+                need_fallback = True
+                logger.warning(f"   ⚠️ 해외 기사 {len(overseas)}개로 부족. 로컬 fallback 적용")
+                selected_urls = {a['url'] for a in domestic + overseas}
+                fallback_en = [a for a in en_unique if a['url'] not in selected_urls]
+                needed = 3 - len(overseas)
+                for art in fallback_en[:needed]:
+                    overseas.append({
+                        "category": "[해외]",
+                        "title": art['title'],
+                        "url": art['url'],
+                        "detected_date": art.get('published_date', TODAY_STR),
+                        "summary": art.get('description', '')[:150]
+                    })
+                logger.info(f"   🔄 해외 기사 {len(overseas)}개로 보충 완료")
+
+            if need_fallback:
+                final_list = domestic + overseas
+
+            logger.info(f"   ✅ 최종 {len(final_list)}개 선별 완료 (국내 {len(domestic)}, 해외 {len(overseas)})")
         else:
-            logger.warning("   ⚠️ AI 선별 실패")
-        
+            # Groq 완전 실패 시 전체 로컬 fallback
+            logger.warning("   ⚠️ AI 선별 실패. 로컬 점수 기반 전체 fallback 적용")
+            domestic = []
+            for art in kr_unique[:7]:
+                domestic.append({
+                    "category": "[국내]",
+                    "title": art['title'],
+                    "url": art['url'],
+                    "detected_date": art.get('published_date', TODAY_STR),
+                    "summary": art.get('description', '')[:150]
+                })
+            overseas = []
+            for art in en_unique[:3]:
+                overseas.append({
+                    "category": "[해외]",
+                    "title": art['title'],
+                    "url": art['url'],
+                    "detected_date": art.get('published_date', TODAY_STR),
+                    "summary": art.get('description', '')[:150]
+                })
+            final_list = domestic + overseas
+            logger.info(f"   🔄 로컬 fallback 완료: {len(final_list)}개 (국내 {len(domestic)}, 해외 {len(overseas)})")
+
         return final_list
         
     except Exception as e:
