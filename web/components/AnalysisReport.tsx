@@ -30,7 +30,7 @@ function RefBadge({ num, article }: { num: string; article?: Article }) {
   );
 }
 
-function renderLineWithBadges(text: string, articles: Article[], keyPrefix: string) {
+function splitByBadges(text: string, articles: Article[], keyPrefix: string) {
   const parts = text.split(/(\[\d+\])/g);
   return parts.map((part, i) => {
     const match = part.match(/^\[(\d+)\]$/);
@@ -39,6 +39,25 @@ function renderLineWithBadges(text: string, articles: Article[], keyPrefix: stri
       return <RefBadge key={`${keyPrefix}-${i}`} num={match[1]} article={articles[idx]} />;
     }
     return <span key={`${keyPrefix}-${i}`}>{part}</span>;
+  });
+}
+
+function renderLineWithBadges(text: string, articles: Article[], keyPrefix: string) {
+  // Split by **bold** first (non-greedy, no nested asterisks), then parse [N] badges inside each segment.
+  const boldSplit = text.split(/(\*\*[^*]+?\*\*)/g);
+  return boldSplit.flatMap((chunk, bi) => {
+    const boldMatch = chunk.match(/^\*\*(.+)\*\*$/);
+    if (boldMatch) {
+      return [
+        <strong
+          key={`${keyPrefix}-b${bi}`}
+          className="font-semibold text-gray-900"
+        >
+          {splitByBadges(boldMatch[1], articles, `${keyPrefix}-b${bi}`)}
+        </strong>,
+      ];
+    }
+    return splitByBadges(chunk, articles, `${keyPrefix}-t${bi}`);
   });
 }
 
