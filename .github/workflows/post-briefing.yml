@@ -1,0 +1,38 @@
+name: Post briefing to Telegram
+
+# Triggered when Cowork (or anyone) pushes a new news.db to main.
+# Read-only with respect to the repo — only sends Telegram, never commits.
+# Safe to coexist with Cowork's daily push (no collision).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/data/news.db'
+  workflow_dispatch:  # manual re-send for debugging
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install --quiet requests
+
+      - name: Send Telegram briefing
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERCEL_DOMAIN: daily-news-agent-ten.vercel.app
+        run: python scripts/post_briefing_telegram.py
