@@ -134,6 +134,7 @@ These rules are non-negotiable. They exist because the Vercel frontend renders o
 3. **Summarize per article**:
    - Korean `title` + `title_original` (if English source, keep original English, add Korean translation).
    - 1-3 sentence summary, 80-150 chars.
+   - **`category` field MUST be exactly one of two literal strings: `[국내]` or `[해외]`** — with the brackets. The frontend (`web/components/NewsCard.tsx`, `web/app/daily/[date]/page.tsx`) filters with `category.includes('국내'|'해외')`, so any other value (`국내` without brackets, English `domestic`/`overseas`, topical tags like `공급망`·`AI 보안`·`취약점`) will mis-render or bypass the filter. Classify by outlet/source: Korean-language Korean outlet → `[국내]`; English-language foreign outlet → `[해외]`. A Korean blog discussing a foreign incident still counts as `[국내]` (it's the outlet/audience that matters for the UI split, not the topic).
 
 4. **Write `종합요약`**:
    - Identify 3 cross-cutting axes from the day's articles (e.g., 공급망 역설, 제로데이 동시발생, 규제 동시이동).
@@ -143,7 +144,18 @@ These rules are non-negotiable. They exist because the Vercel frontend renders o
 
 5. **Persist to DB**:
    - Insert each article into `articles` table (columns: `id`, `date`, `category`, `title`, `title_original`, `url`, `summary`, `insight`, `detected_date`, `created_at`).
+   - `category` values must be exactly `[국내]` or `[해외]` (see Step 3).
    - Upsert today's row into `daily_briefings` (columns: `date`, `analysis`, `created_at`).
+   - **Post-insert sanity check** — run this before moving on. If it prints anything, stop and fix:
+     ```python
+     cur.execute(
+         "SELECT id, category FROM articles WHERE date=? AND category NOT IN ('[국내]','[해외]')",
+         (TODAY,),
+     )
+     bad = cur.fetchall()
+     if bad:
+         raise SystemExit(f"category guard failed: {bad}")
+     ```
 
 6. **Skip Telegram in Cowork** — Telegram delivery is handled by GitHub Actions (`post-briefing.yml`) which triggers on push. **Do NOT call api.telegram.org from Cowork**; that endpoint is allowlist-blocked and will return 403. Rely on Step 7's push to kick off delivery.
 
