@@ -47,3 +47,5 @@
 2026-05-19T23:19:14Z — 2026-05-20 briefing: 15 articles (ids 945-959), 4368 chars, clean /tmp clone, push OK
 
 2026-05-25T05:56:25Z — 2026-05-25 briefing: 15 articles (ids 960-974), 3961 chars, clean /tmp clone, push OK
+
+2026-05-25T23:39:14Z — 2026-05-26 briefing: 15 articles (ids 975-989), 3722 chars, clean /tmp clone, push OK
