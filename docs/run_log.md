@@ -52,3 +52,5 @@
 2026-05-26T23:47:23Z — 2026-05-27 briefing: 15 articles (ids 990-1004), 5495 chars, v6.5 round-table, clean /tmp clone, push OK (8870699)
 
 2026-05-27T23:19:23Z — 2026-05-28 briefing: 15 articles (ids 1005-1019), 6342 chars, v6.5 round-table, clean /tmp clone, push OK (aa36844)
+
+2026-05-28T23:25:48Z — 2026-05-29 briefing: 15 articles (ids 1020-1034), 6983 chars, v6.5 round-table, clean /tmp clone, push OK (5912318)
