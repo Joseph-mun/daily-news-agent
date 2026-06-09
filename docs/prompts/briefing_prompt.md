@@ -155,6 +155,12 @@ These rules are non-negotiable. They exist because the Vercel frontend renders o
 
 1. **Collect** (WebSearch / WebFetch via Cowork-native tools):
    - Search 8~12 queries covering 4개 트랙. Apply 48h filter **before** ranking.
+   - **RSS-first discovery (v6.6 — 캐시 회피 필수)**: 무인 실행 환경에서 뉴스사이트 목록(HTML) WebFetch는 **URL 변형마다 제각각 과거 시점의 CDN 캐시**를 반환하므로(같은 목록이 5/13·6/1·6/8로 상이) 당일 신선 기사 발견에 부적합. 신선 디스커버리는 다음 순서로 한다:
+     1. **WebSearch로 RSS/피드 URL을 provenance에 시드** → **RSS(XML) WebFetch**로 `pubDate` 포함 최신 목록 확보. dailysecu: `https://www.dailysecu.com/rss/allArticle.xml`, `https://www.dailysecu.com/rss/S1N2.xml`(이슈). boannews RSS도 병행.
+     2. RSS가 막히거나 부족하면 **WebSearch에 명시적 날짜·`site:` 필터** 사용(예: `site:dailysecu.com 2026-06-09 금융보안`, `site:boannews.com 6월 9일 개인정보`).
+     3. **기사 상세 페이지 WebFetch는 발행시점 캐시라 정확** → 위에서 발견한 신선 URL만 상세 취득해 본문·`article:published_time` 확인.
+   - **목록 HTML(예: `articleList.html`, `media/t_list.asp`) 단독 의존 금지** — 캐시 지연으로 전일 브리핑이 이미 소비한 분량만 반복 노출될 수 있음.
+   - bash에서 `openapi.naver.com`/`api.tavily.com` 직접 호출은 Cowork 샌드박스 egress(현재 github.com만 허용)에서 차단됨 — 허용되면 repo `news_bot.py`의 `search_naver_news()`를 1차 수집기로 우선 사용.
 
 2. **Select** 15 articles (10 국내 + 5 해외):
    - 트랙별 최소 라인: A·B 각 2건 이상, C(금융) 2건 + C(일반 정보보호) 1건 이상, D 5건 이내.
@@ -210,6 +216,23 @@ These rules are non-negotiable. They exist because the Vercel frontend renders o
 - DB write 실패 → push 금지.
 - push 실패 → 다음 날 Step 0의 `pull --rebase`가 drift 흡수.
 
+### Abort 시 가시화 (v6.6 — 사일런트 실패 방지) — 필수
+abort하면 브리핑은 미발행하되, **실행 흔적과 사유를 반드시 남긴다.** `web/data/news.db`는 절대 건드리지 않으므로 아래는 `post-briefing.yml`(news.db 변경 시에만 트리거)을 발동시키지 않아 Telegram 오발송이 없다 — 안전한 경로다.
+
+1. `$RUN_DIR/docs/run_log.md`에 한 줄 append:
+   ```
+   <UTC ISO8601> — <TODAY> ABORT: <사유 요약> (예: 신선 국내 0건/48h, web_fetch 캐시 지연·egress 차단)
+   ```
+2. **`docs/run_log.md`만** 스테이징해서 커밋·푸시 (news.db 제외):
+   ```bash
+   cd "$RUN_DIR"
+   git add docs/run_log.md
+   git commit -m "abort: $(date +%Y-%m-%d) — no fresh briefing (reason logged)"
+   git fetch origin && git rebase origin/main || { git rebase --abort; exit 1; }
+   git push "https://${GITHUB_TOKEN}@github.com/Joseph-mun/daily-news-agent.git" main
+   ```
+3. 사후 출력에 abort 사유·신선 후보·차단된 수집 경로를 명시해 Joseph이 원인을 즉시 파악하도록 한다.
+
 ## Reference Sample
 
 - v6.5 canonical: `docs/briefing_2026-05-26_roundtable_v2.md` — 라운드테이블 검증판.
@@ -217,11 +240,12 @@ These rules are non-negotiable. They exist because the Vercel frontend renders o
 
 ---
 
-**Version**: v6.5 (round-table validation layer)
-**Last updated**: 2026-05-27
+**Version**: v6.6 (collection-resilience layer)
+**Last updated**: 2026-06-09
 **Owner**: Joseph (josephdaniel8912@gmail.com)
 
 **Changelog**
+- v6.6 (2026-06-09): Collection-resilience + abort 가시화. (1) **RSS-first discovery** 의무화 — 무인 실행에서 WebFetch 목록 HTML이 URL별 상이한 과거 CDN 캐시를 반환해 당일 신선 기사 발견 실패 → RSS(XML, pubDate) → 날짜·`site:` WebSearch → 상세 WebFetch 순서로 변경. 목록 HTML 단독 의존 금지. (2) **Abort 시 `docs/run_log.md` 기록·푸시** 의무화 (news.db 미변경 경로라 Telegram 오발송 없음) — 사일런트 실패 제거. Rationale: 2026-06-09 실행이 신선 국내 0건(48h)으로 정상 abort했으나, 원인이 뉴스 가뭄이 아니라 수집 경로 차단(bash egress=github.com만 허용, WebFetch 캐시 지연, 무인 시점 브라우저 미연결)이었음이 사후 진단으로 확인됨. `docs/incident_2026-06-09_collection_blindness.md` 참조.
 - v6.5 (2026-05-27): Round-table validation layer 도입. 분석 필드 구조 확장 — 인트로(Answer-First, 신뢰도) → 3축(라운드테이블 보강 박스 포함) → `### So What?`(BCG 4단) → `### 액션`(DACI+RICE) → `### Pre-mortem`(확률+잔존) → `### 결론 및 전망` → `### 방법론 메타`(마지막에만). 부록/출처 일람 섹션 작성 금지 (UI에서 article list로 자동 노출). 방법론 풋프린트는 본문 상단/인트로 노출 금지, 반드시 맨 끝 `### 방법론 메타`에만. 길이 상향 3,000~4,000자 → **4,500~5,500자**. Rationale: 2026-05-26 사용자 리뷰 — 기존 v6.4 결론부의 정량 액션 부족 / Pre-mortem 미존재 / 의사결정 가속을 위한 DACI+RICE 부재가 임원 미팅 적용 시 약점으로 지적됨. 임원 라운드테이블(8인 60분, Amazon 6-pager 모드)을 거친 결과물 형태로 표준화.
 - v6.4 (2026-05-06): Scope rebalanced into 4 explicit tracks (A 정책 / B 개인정보 / C 침해사고 — 금융+일반 / D 글로벌). Article mix 10 국내 + 5 해외. Insertion order 국내 먼저. `### 결론 및 전망` 별도 헤더. Total length 3,000~4,000자.
 - v6.3 (2026-04-21): Telegram delivery delegated to GitHub Actions. PAT-embedded HTTPS push.
