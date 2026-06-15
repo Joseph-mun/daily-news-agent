@@ -74,3 +74,4 @@
 2026-06-10T23:20:22Z — 2026-06-11 briefing: 15 articles (ids 1189-1203), 3053 chars, v7.1 format, clean /tmp clone, push pending
 2026-06-12T00:26:15Z — 2026-06-12 briefing: 15 articles (ids 1204-1218), 2988 chars, v7.1 format, clean /tmp clone, push OK
 2026-06-14T23:38:51Z — 2026-06-15 briefing: 9 articles (ids 1219-1227), 2662 chars, v7.1 format, Fri-Mon window, clean /tmp clone, push pending
+2026-06-15T23:25:54Z — 2026-06-16 briefing: 12 articles (ids 1228-1239), 3012 chars, v7.1 format, clean /tmp clone, push OK (4295669)
