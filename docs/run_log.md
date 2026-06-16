@@ -75,3 +75,4 @@
 2026-06-12T00:26:15Z — 2026-06-12 briefing: 15 articles (ids 1204-1218), 2988 chars, v7.1 format, clean /tmp clone, push OK
 2026-06-14T23:38:51Z — 2026-06-15 briefing: 9 articles (ids 1219-1227), 2662 chars, v7.1 format, Fri-Mon window, clean /tmp clone, push pending
 2026-06-15T23:25:54Z — 2026-06-16 briefing: 12 articles (ids 1228-1239), 3012 chars, v7.1 format, clean /tmp clone, push OK (4295669)
+2026-06-16T23:11:35Z — 2026-06-17 briefing: 12 articles (ids 1251-1262), 2949 chars, v7.1 format, clean /tmp clone, push pending (user-requested article included: 금융위 신용정보 동의제도)
