@@ -77,3 +77,4 @@
 2026-06-15T23:25:54Z — 2026-06-16 briefing: 12 articles (ids 1228-1239), 3012 chars, v7.1 format, clean /tmp clone, push OK (4295669)
 2026-06-16T23:11:35Z — 2026-06-17 briefing: 12 articles (ids 1251-1262), 2949 chars, v7.1 format, clean /tmp clone, push pending (user-requested article included: 금융위 신용정보 동의제도)
 2026-06-18T07:22:41Z — 2026-06-18 briefing: 12 articles (ids 1263-1274), 2906 chars, v7.1 format, 8 국내 + 4 해외, clean /tmp clone, push OK (acabbda)
+2026-06-18T22:59:03Z — 2026-06-19 briefing: 6 articles (ids 1275-1280), 2879 chars, v7.1 format, 3 국내 + 3 해외, clean /tmp clone, push OK (d189a9a). Note: collection constrained by CDN-cached list pages + US-only WebSearch + web_fetch provenance lock; fresh pool thin (env, not news drought). 1 finance item (금융보안원 AI 모의해킹, 06-16) slightly >48h, included for 금융권 Track A coverage.
