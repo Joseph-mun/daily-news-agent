@@ -83,3 +83,5 @@
 2026-06-22T23:31:19Z — 2026-06-23 briefing: 11 articles (ids 1296-1306), 2648 chars, v7.1 format, 8 국내 + 3 해외, clean /tmp clone, push OK
 2026-06-23T23:20:21Z — 2026-06-24 briefing: 7 articles (ids 1307-1313), 2918 chars, v7.1 format, 2 국내 + 5 해외, clean /tmp clone, push pending. Note: fresh domestic incident pool thin (TVING/CU포스트/쿠팡/코닥 already in DB); set is AI-governance + credential/supply-chain themed.
 2026-06-24T23:41:27Z — 2026-06-25 briefing: 8 articles (ids 1314-1321), 2962 chars, v7.1 format, 7 국내 + 1 해외, clean /tmp clone, push OK
+
+2026-06-25T23:19:24Z — 2026-06-26 briefing: 7 articles (ids 1322-1328), 3027 chars, v7.1 format, 5 국내 + 2 해외, clean /tmp clone, push OK. Note: fresh domestic incident pool thin (env: CDN-cached lists + US-only WebSearch); set is AI-governance + device/edge-vuln + supply-chain themed. Tata(06-22) slightly >48h, included for supply-chain coverage.
