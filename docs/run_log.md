@@ -86,3 +86,4 @@
 
 2026-06-25T23:19:24Z — 2026-06-26 briefing: 7 articles (ids 1322-1328), 3027 chars, v7.1 format, 5 국내 + 2 해외, clean /tmp clone, push OK. Note: fresh domestic incident pool thin (env: CDN-cached lists + US-only WebSearch); set is AI-governance + device/edge-vuln + supply-chain themed. Tata(06-22) slightly >48h, included for supply-chain coverage.
 2026-06-28T05:27:47Z — 2026-06-28 briefing: 13 articles (ids 1329-1341), 3002 chars, v7.1 format, 8 국내 + 5 해외, Sat-Sun window, clean /tmp clone, push pending. Note: weekend pool; theme = AI 무기화(클로드+헥스스트라이크, 오픈AI 메일 피싱) + 개인정보위 가상자산 제재(빗썸) + 범부처 AI범죄 협의체.
+2026-06-28T23:28:12Z — 2026-06-29 briefing: 8 articles (ids 1342-1349), 3006 chars, v7.1 format, 5 국내 + 3 해외, clean /tmp clone, push OK (3cf74d0). Note: Sun-Mon window; dailysecu cache exhausted (06-28 batch already in DB), boannews fresh pool tapped; theme = AI 수출·접근통제(GPT-5.6/미토스5) + 신뢰경로 공급망(크롬 확장앱) + 개인정보위 G7 국제공조.
