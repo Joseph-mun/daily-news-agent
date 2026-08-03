@@ -48,8 +48,8 @@ PAT 스코프가 `Contents: Write`로만 제한돼 있어 유출 시에도 이 �
 
 1. https://github.com/Joseph-mun/daily-news-agent/settings/secrets/actions 접속
 2. `New repository secret` 2개 추가:
-   - **`TELEGRAM_BOT_TOKEN`** = `8237022848:AAHNqDZ-K16GqUMDV16B_m_b_Lz0njhL3Wg`
-   - **`TELEGRAM_CHAT_ID`** = `1582270852`
+   - **`TELEGRAM_BOT_TOKEN`** = `<BotFather에서 발급받은 토큰>`
+   - **`TELEGRAM_CHAT_ID`** = `<본인 chat ID>`
 
 이 값들은 Cowork 샌드박스 `.env` 에도 남겨두되, **GitHub Actions가 사용하는 건 repo secrets**. Cowork는 Telegram을 더 이상 직접 보내지 않음.
 
